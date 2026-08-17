@@ -49,10 +49,11 @@ Creative Commons Attribution-ShareAlike 4.0 International
 any redistribution of these three files, or of images/fonts derived from
 them, must carry the same CC BY-SA 4.0 attribution and share-alike terms.
 
-## MSX ROM font (pending)
+## MSX ROM font (HotBit) — deliberately not included
 
-Not included yet. If added later, it will come from a ROM dump the project
-owner extracted from their own MSX hardware — not redistributed as open
-source, kept out of the public tree (or in a private/local-only location),
-since the MSX character ROM itself is copyrighted (Microsoft/ASCII
-Corporation lineage), unlike every other font above.
+Extracted from a `hotbit13p.rom` (32KB MSX1 BIOS+BASIC, HB-8000-class
+Brazilian HotBit clone) dumped by the project owner from their own
+hardware, for personal side-by-side comparison against the fonts above.
+Not committed here and not redistributed — the MSX character ROM itself
+is copyrighted (Microsoft/ASCII Corporation lineage), unlike every other
+font in this file. Kept local only.
