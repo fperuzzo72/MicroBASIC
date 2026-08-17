@@ -2,39 +2,50 @@
 
 `research/fonts/` carries font source files pulled in for the SCREEN 0/1/2
 text-mode font evaluation (see README.md and `research/fonts/previews/` for
-the rendered 800x480 1-bit comparison sheets). Each family's own license file
-is preserved alongside it in `research/fonts/src/`.
+the rendered 480x800 1-bit comparison sheets, portrait-rotated to match how
+CPR-vCodex actually displays them). Each family's own license file is
+preserved alongside it in `research/fonts/src/`.
 
 ## Spleen
 
-BDF files `spleen-8x16.bdf`, `spleen-12x24.bdf`, `spleen-16x32.bdf`, from
+BDF files `spleen-12x24.bdf`, `spleen-16x32.bdf`, `spleen-32x64.bdf`, from
 [fcambus/spleen](https://github.com/fcambus/spleen) by Frédéric Cambus.
 BSD 2-Clause license — full text in `research/fonts/src/spleen-LICENSE`.
+(`spleen-8x16.bdf` was downloaded too but dropped from the preview set —
+below the 10x20 readability floor.)
 
 ## Terminus Font
 
-BDF files `ter-u16n.bdf`, `ter-u24n.bdf`, `ter-u32n.bdf`, from
+BDF files `ter-u20n.bdf`, `ter-u24n.bdf`, `ter-u32n.bdf`, from
 [Terminus Font](https://terminus-font.sourceforge.net/) by Dimitar Zhekov
 (mirrored at
 [balabit-deps/balabit-os-8-xfonts-terminus](https://github.com/balabit-deps/balabit-os-8-xfonts-terminus)).
 SIL Open Font License 1.1 — full text in
-`research/fonts/src/terminus-LICENSE`.
+`research/fonts/src/terminus-LICENSE`. (`ter-u16n.bdf`, previously used,
+dropped for the same floor reason.)
 
 ## Tamzen
 
-BDF files `Tamzen6x12r.bdf`, `Tamzen8x16r.bdf`, `Tamzen10x20r.bdf`, from
+Bold weight only: `Tamzen10x20b.bdf`, from
 [sunaku/tamzen-font](https://github.com/sunaku/tamzen-font), a fork of
 Scott Fial's [Tamsyn](http://www.fial.com/~scott/tamsyn-font/) font. Free to
 use, copy, and modify — full text in `research/fonts/src/tamzen-LICENSE`.
+The regular weight (`Tamzen6x12r.bdf`, `Tamzen8x16r.bdf`,
+`Tamzen10x20r.bdf`, still in `src/`) read too thin/light on the e-ink
+panel, so the preview set switched to bold. `TamzenBold_medium_20x40.bmp`
+and `TamzenBold_large_30x60.bmp` are clean 2x/3x nearest-neighbor
+upscales of the 10x20 bold glyphs — no native Tamzen size exists above
+10x20.
 
 ## Unscii
 
 Hex files `unscii-8.hex`, `unscii-16.hex`, from
 [viznut/unscii](https://github.com/viznut/unscii) by Ville-Matias Heikkilä
 (viznut). Public domain / CC0 — full text in
-`research/fonts/src/unscii-LICENSE`. The `Unscii_large_16x32.bmp` preview is
-a 2x nearest-neighbor pixel-double of `unscii-16.hex` (no native 16x32
-variant exists).
+`research/fonts/src/unscii-LICENSE`. No native Unscii size reaches the
+10x20 floor (max is 8x16), so all three previews are nearest-neighbor
+upscales of `unscii-16.hex`: `Unscii_small_16x32.bmp` (2x),
+`Unscii_medium_24x48.bmp` (3x), `Unscii_large_32x64.bmp` (4x).
 
 ## Ultimate Oldschool PC Font Pack (IBM CGA/EGA/VGA)
 
@@ -49,16 +60,19 @@ Creative Commons Attribution-ShareAlike 4.0 International
 any redistribution of these three files, or of images/fonts derived from
 them, must carry the same CC BY-SA 4.0 attribution and share-alike terms.
 
-## MSX ROM font (HotBit) — rendered preview only, raw data not included
+## MSX ROM font (HotBit) — not currently in `previews/`
 
-`research/fonts/previews/HotBit-MSX1_font_8x8.bmp` was rendered from the
-character generator table of a `hotbit13p.rom` (32KB MSX1 BIOS+BASIC,
-HB-8000-class Brazilian HotBit clone) dumped by the project owner from
-their own hardware. Included here only as a personal visual-comparison
-reference alongside the openly-licensed fonts above.
+A preview was rendered from the character generator table of a
+`hotbit13p.rom` (32KB MSX1 BIOS+BASIC, HB-8000-class Brazilian HotBit
+clone) dumped by the project owner from their own hardware, for personal
+visual-comparison reference alongside the openly-licensed fonts above.
+It was pulled from `previews/` in the 10x20-floor resizing pass (its
+native cell is a square 8x8, so the 2:1 width:height scaling used for
+the other families doesn't map onto it directly) — can be re-added once
+its own scaling is worked out.
 
 The **raw extracted font data** (the 2048-byte glyph table pulled out of
-the ROM) is deliberately *not* committed anywhere in this repo and not
-redistributed — the MSX character ROM itself is copyrighted
-(Microsoft/ASCII Corporation lineage), unlike every other font in this
-file. Kept local only, on the project owner's own machine.
+the ROM) has never been committed to this repo and won't be — the MSX
+character ROM itself is copyrighted (Microsoft/ASCII Corporation
+lineage), unlike every other font in this file. Kept local only, on the
+project owner's own machine.

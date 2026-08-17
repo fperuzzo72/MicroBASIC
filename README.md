@@ -36,7 +36,7 @@ research that'll drive the first implementation decisions.
 
 ## `research/fonts/`
 
-- `previews/` — 16 rendered 1-bit BMPs, one per font/size combination,
+- `previews/` — 15 rendered 1-bit BMPs, one per font/size combination,
   meant to be copied straight onto the device's SD card and viewed with
   the reader. **480x800 (portrait)**, not the panel's native 800x480 —
   CPR-vCodex's `BmpViewerActivity` displays at `renderer.getScreenWidth/
@@ -54,12 +54,32 @@ research that'll drive the first implementation decisions.
 
 Candidates: [Spleen](https://github.com/fcambus/spleen),
 [Terminus](https://terminus-font.sourceforge.net/),
-[Tamzen](https://github.com/sunaku/tamzen-font),
-[Unscii](https://github.com/viznut/unscii), the IBM CGA/EGA/VGA faces
-from the [Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/),
-and (for personal reference only) the character ROM of a HotBit MSX1 —
-see NOTICE.md. `Tamzen 10x20` lands closest to a classic 80x24 grid on
-the X4's 800x480 panel. Font pick from these is not final — pending
+[Tamzen](https://github.com/sunaku/tamzen-font) (bold weight — the
+regular weight read too thin/light on e-ink), [Unscii](https://github.com/viznut/unscii),
+and the IBM CGA/EGA/VGA faces from the
+[Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/).
+
+Sizing floor: **10x20 px is the smallest readable cell** on the physical
+panel (smaller was tried first and rejected — see git history). Every
+`small`/`medium`/`large` triplet below now targets roughly the
+80-column / 64-column / 40-column landscape grid, using each family's
+native BDF size where one exists at/above that floor, otherwise a clean
+integer nearest-neighbor upscale (2x/3x/4x) of the largest available
+native size — never a fractional/distorting scale:
+
+| Family | small | medium | large |
+|---|---|---|---|
+| Spleen | 12x24 (native, 66 cols) | 16x32 (native, 50 cols) | 32x64 (native, 25 cols) |
+| Terminus | 10x20 (native, 80 cols) | 12x24 (native, 66 cols) | 16x32 (native, 50 cols) |
+| Tamzen Bold | 10x20 (native, 80 cols) | 20x40 (2x, 40 cols) | 30x60 (3x, 26 cols) |
+| Unscii | 16x32 (2x of 8x16, 50 cols) | 24x48 (3x, 33 cols) | 32x64 (4x, 25 cols) |
+| Oldschool IBM | CGA @ ~10px (80 cols) | EGA @ ~12px (66 cols) | VGA @ ~20px (40 cols) |
+
+The MSX ROM font preview (HotBit) was pulled from `previews/` in this
+pass — only these 15 got regenerated at the new sizing. Re-add on
+request once its own scaling is worked out (its native cell is a square
+8x8, so the same 2:1 width:height integer-scale approach doesn't
+directly apply). Font pick from all of this is not final — pending
 visual comparison on the physical device.
 
 ## Hardware
