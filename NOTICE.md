@@ -8,21 +8,25 @@ preserved alongside it in `research/fonts/src/`.
 
 ## Spleen
 
-BDF files `spleen-12x24.bdf`, `spleen-16x32.bdf`, `spleen-32x64.bdf`, from
-[fcambus/spleen](https://github.com/fcambus/spleen) by Frédéric Cambus.
-BSD 2-Clause license — full text in `research/fonts/src/spleen-LICENSE`.
-(`spleen-8x16.bdf` was downloaded too but dropped from the preview set —
-below the 10x20 readability floor.)
+BDF file `spleen-16x32.bdf` (the only size still in `previews/`, as
+"medium") from [fcambus/spleen](https://github.com/fcambus/spleen) by
+Frédéric Cambus. BSD 2-Clause license — full text in
+`research/fonts/src/spleen-LICENSE`. `spleen-8x16.bdf` and
+`spleen-32x64.bdf` are still in `src/` but no longer rendered — 8x16 is
+below the 10x20 readability floor, 32x64 was confirmed larger than
+worth the lost columns.
 
 ## Terminus Font
 
-BDF files `ter-u20n.bdf`, `ter-u24n.bdf`, `ter-u32n.bdf`, from
+BDF files `ter-u20n.bdf`, `ter-u24n.bdf`, `ter-u32n.bdf` (regular) and
+`ter-u20b.bdf`, `ter-u24b.bdf` (bold, added to compare against Tamzen
+Bold and regular Terminus at identical cell size), from
 [Terminus Font](https://terminus-font.sourceforge.net/) by Dimitar Zhekov
 (mirrored at
 [balabit-deps/balabit-os-8-xfonts-terminus](https://github.com/balabit-deps/balabit-os-8-xfonts-terminus)).
 SIL Open Font License 1.1 — full text in
 `research/fonts/src/terminus-LICENSE`. (`ter-u16n.bdf`, previously used,
-dropped for the same floor reason.)
+stays in `src/` but dropped from previews — below the floor.)
 
 ## Tamzen
 
@@ -32,10 +36,9 @@ Scott Fial's [Tamsyn](http://www.fial.com/~scott/tamsyn-font/) font. Free to
 use, copy, and modify — full text in `research/fonts/src/tamzen-LICENSE`.
 The regular weight (`Tamzen6x12r.bdf`, `Tamzen8x16r.bdf`,
 `Tamzen10x20r.bdf`, still in `src/`) read too thin/light on the e-ink
-panel, so the preview set switched to bold. `TamzenBold_medium_20x40.bmp`
-and `TamzenBold_large_30x60.bmp` are clean 2x/3x nearest-neighbor
-upscales of the 10x20 bold glyphs — no native Tamzen size exists above
-10x20.
+panel. The 2x/3x upscaled bold variants tried in the previous pass
+(20x40, 30x60) were dropped this round — confirmed larger than worth
+the lost columns; only the native 10x20 remains in `previews/`.
 
 ## Unscii
 
@@ -43,11 +46,13 @@ Hex files `unscii-8.hex`, `unscii-16.hex`, from
 [viznut/unscii](https://github.com/viznut/unscii) by Ville-Matias Heikkilä
 (viznut). Public domain / CC0 — full text in
 `research/fonts/src/unscii-LICENSE`. No native Unscii size reaches the
-10x20 floor (max is 8x16), so all three previews are nearest-neighbor
+10x20 floor (max is 8x16), so both remaining previews are nearest-neighbor
 upscales of `unscii-16.hex`: `Unscii_small_16x32.bmp` (2x),
-`Unscii_medium_24x48.bmp` (3x), `Unscii_large_32x64.bmp` (4x).
+`Unscii_medium_24x48.bmp` (3x). The 4x upscale (32x64, previously
+"large") was dropped this round — confirmed larger than worth the lost
+columns.
 
-## Ultimate Oldschool PC Font Pack (IBM CGA/EGA/VGA)
+## Ultimate Oldschool PC Font Pack (IBM CGA/EGA/VGA) — not currently in `previews/`
 
 TTF files `Px437_IBM_CGA.ttf`, `Px437_IBM_EGA_8x14.ttf`,
 `Px437_IBM_VGA_8x16.ttf` — hardware-authentic recreations of real IBM
@@ -59,6 +64,8 @@ Creative Commons Attribution-ShareAlike 4.0 International
 ([full license text](https://creativecommons.org/licenses/by-sa/4.0/legalcode)) —
 any redistribution of these three files, or of images/fonts derived from
 them, must carry the same CC BY-SA 4.0 attribution and share-alike terms.
+Weren't part of the round-2 feedback, so left out of this round's
+previews; still in `src/` in case they come back into consideration.
 
 ## MSX ROM font (HotBit) — not currently in `previews/`
 

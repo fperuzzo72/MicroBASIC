@@ -36,51 +36,50 @@ research that'll drive the first implementation decisions.
 
 ## `research/fonts/`
 
-- `previews/` — 15 rendered 1-bit BMPs, one per font/size combination,
-  meant to be copied straight onto the device's SD card and viewed with
-  the reader. **480x800 (portrait)**, not the panel's native 800x480 —
-  CPR-vCodex's `BmpViewerActivity` displays at `renderer.getScreenWidth/
-  Height()`, which is orientation-aware and defaults to `Portrait`
-  (480x800 logical); a native-panel-resolution landscape BMP gets shrunk
-  to fit instead of shown 1:1. Each image was rendered at 800x480 first,
-  then rotated 90° clockwise — matching the exact transform
-  `GfxRenderer::rotateCoordinates()` uses for `Portrait` in CPR-vCodex,
-  not a guessed rotation. Each starts with the font's own name and cell
-  size printed in that font, followed by the full charset and the
-  standard pangram, repeated to fill the screen.
+- `previews/` — 9 rendered 1-bit BMPs: the round-2 candidates the project
+  owner actually confirmed readable on the physical device, narrowed
+  down from the full field, plus two new Terminus Bold sizes added
+  specifically to compare against Tamzen Bold and regular-weight
+  Terminus at the same cell size. Sizes above 24x48 px were dropped —
+  confirmed too large to be worth the lost columns. **480x800
+  (portrait)**, not the panel's native 800x480 — CPR-vCodex's
+  `BmpViewerActivity` displays at `renderer.getScreenWidth/Height()`,
+  which is orientation-aware and defaults to `Portrait` (480x800
+  logical); a native-panel-resolution landscape BMP gets shrunk to fit
+  instead of shown 1:1. Each image was rendered at 800x480 first, then
+  rotated 90° clockwise — matching the exact transform
+  `GfxRenderer::rotateCoordinates()` uses for `Portrait` in CPR-vCodex.
+
+  Each image now carries a **character-cell ruler** for measuring
+  columns/rows directly off the screen: row 1 is a column ruler (blank
+  in columns 1-2, then the column number right-aligned so its last
+  digit lands exactly on that column, every 5 columns starting at 5);
+  every row below that starts with its own 2-digit row number (rows
+  2..N — row 1 is the ruler, not counted), then the actual content
+  shifted right by those same 2 columns. The font's name/size still
+  prints as the first line of content, immediately under the ruler.
 - `src/` — the font source files (BDF/hex/TTF) the previews were rendered
   from, plus each family's own license file. See `NOTICE.md` for full
-  attribution.
+  attribution. Carries a few sizes/weights no longer used in
+  `previews/` (Spleen 8x16/32x64, Terminus 16x32, Tamzen regular, the
+  Oldschool IBM TTFs) — kept for reference in case any of them come
+  back into consideration.
 
-Candidates: [Spleen](https://github.com/fcambus/spleen),
-[Terminus](https://terminus-font.sourceforge.net/),
-[Tamzen](https://github.com/sunaku/tamzen-font) (bold weight — the
-regular weight read too thin/light on e-ink), [Unscii](https://github.com/viznut/unscii),
-and the IBM CGA/EGA/VGA faces from the
-[Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/).
+| Family | size | cell | landscape grid | content cols (minus ruler) |
+|---|---|---|---|---|
+| Terminus | small | 10x20 | 80x24 | 78 |
+| Terminus Bold | small | 10x20 | 80x24 | 78 |
+| Tamzen Bold | small | 10x20 | 80x24 | 78 |
+| Terminus | medium | 12x24 | 66x20 | 64 |
+| Terminus Bold | medium | 12x24 | 66x20 | 64 |
+| Terminus | large | 16x32 | 50x15 | 48 |
+| Spleen | medium | 16x32 | 50x15 | 48 |
+| Unscii | small | 16x32 | 50x15 | 48 |
+| Unscii | medium | 24x48 | 33x10 | 31 |
 
-Sizing floor: **10x20 px is the smallest readable cell** on the physical
-panel (smaller was tried first and rejected — see git history). Every
-`small`/`medium`/`large` triplet below now targets roughly the
-80-column / 64-column / 40-column landscape grid, using each family's
-native BDF size where one exists at/above that floor, otherwise a clean
-integer nearest-neighbor upscale (2x/3x/4x) of the largest available
-native size — never a fractional/distorting scale:
-
-| Family | small | medium | large |
-|---|---|---|---|
-| Spleen | 12x24 (native, 66 cols) | 16x32 (native, 50 cols) | 32x64 (native, 25 cols) |
-| Terminus | 10x20 (native, 80 cols) | 12x24 (native, 66 cols) | 16x32 (native, 50 cols) |
-| Tamzen Bold | 10x20 (native, 80 cols) | 20x40 (2x, 40 cols) | 30x60 (3x, 26 cols) |
-| Unscii | 16x32 (2x of 8x16, 50 cols) | 24x48 (3x, 33 cols) | 32x64 (4x, 25 cols) |
-| Oldschool IBM | CGA @ ~10px (80 cols) | EGA @ ~12px (66 cols) | VGA @ ~20px (40 cols) |
-
-The MSX ROM font preview (HotBit) was pulled from `previews/` in this
-pass — only these 15 got regenerated at the new sizing. Re-add on
-request once its own scaling is worked out (its native cell is a square
-8x8, so the same 2:1 width:height integer-scale approach doesn't
-directly apply). Font pick from all of this is not final — pending
-visual comparison on the physical device.
+Font pick is not final — the three 10x20 "small" variants (Terminus
+regular/Bold, Tamzen Bold) are there specifically to be compared
+side by side at identical dimensions.
 
 ## Hardware
 
