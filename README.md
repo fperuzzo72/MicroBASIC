@@ -36,11 +36,18 @@ research that'll drive the first implementation decisions.
 
 ## `research/fonts/`
 
-- `previews/` — 15 rendered 800x480 1-bit BMPs, one per font/size
-  combination, meant to be copied straight onto the device's SD card and
-  viewed on the actual e-ink panel. Each starts with the font's own name
-  and cell size printed in that font, followed by the full charset and
-  the standard pangram, repeated to fill the screen.
+- `previews/` — 16 rendered 1-bit BMPs, one per font/size combination,
+  meant to be copied straight onto the device's SD card and viewed with
+  the reader. **480x800 (portrait)**, not the panel's native 800x480 —
+  CPR-vCodex's `BmpViewerActivity` displays at `renderer.getScreenWidth/
+  Height()`, which is orientation-aware and defaults to `Portrait`
+  (480x800 logical); a native-panel-resolution landscape BMP gets shrunk
+  to fit instead of shown 1:1. Each image was rendered at 800x480 first,
+  then rotated 90° clockwise — matching the exact transform
+  `GfxRenderer::rotateCoordinates()` uses for `Portrait` in CPR-vCodex,
+  not a guessed rotation. Each starts with the font's own name and cell
+  size printed in that font, followed by the full charset and the
+  standard pangram, repeated to fill the screen.
 - `src/` — the font source files (BDF/hex/TTF) the previews were rendered
   from, plus each family's own license file. See `NOTICE.md` for full
   attribution.
@@ -48,14 +55,12 @@ research that'll drive the first implementation decisions.
 Candidates: [Spleen](https://github.com/fcambus/spleen),
 [Terminus](https://terminus-font.sourceforge.net/),
 [Tamzen](https://github.com/sunaku/tamzen-font),
-[Unscii](https://github.com/viznut/unscii), and the IBM CGA/EGA/VGA faces
-from the [Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/).
-`Tamzen 10x20` lands closest to a classic 80x24 grid on the X4's 800x480
-panel. Font pick from these is not final — pending visual comparison on
-the physical device.
-
-An MSX ROM font extraction is pending (see NOTICE.md — won't be
-redistributed here, copyright reasons).
+[Unscii](https://github.com/viznut/unscii), the IBM CGA/EGA/VGA faces
+from the [Ultimate Oldschool PC Font Pack](https://int10h.org/oldschool-pc-fonts/),
+and (for personal reference only) the character ROM of a HotBit MSX1 —
+see NOTICE.md. `Tamzen 10x20` lands closest to a classic 80x24 grid on
+the X4's 800x480 panel. Font pick from these is not final — pending
+visual comparison on the physical device.
 
 ## Hardware
 
