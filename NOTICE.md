@@ -19,14 +19,19 @@ worth the lost columns.
 ## Terminus Font
 
 BDF files `ter-u20n.bdf`, `ter-u24n.bdf`, `ter-u32n.bdf` (regular) and
-`ter-u20b.bdf`, `ter-u24b.bdf` (bold, added to compare against Tamzen
-Bold and regular Terminus at identical cell size), from
+`ter-u20b.bdf`, `ter-u24b.bdf`, `ter-u32b.bdf` (bold, added to compare
+against Tamzen Bold and regular Terminus at identical cell sizes —
+Terminus Bold has a native size at every one of small/medium/large, no
+scaling needed), from
 [Terminus Font](https://terminus-font.sourceforge.net/) by Dimitar Zhekov
 (mirrored at
 [balabit-deps/balabit-os-8-xfonts-terminus](https://github.com/balabit-deps/balabit-os-8-xfonts-terminus)).
 SIL Open Font License 1.1 — full text in
 `research/fonts/src/terminus-LICENSE`. (`ter-u16n.bdf`, previously used,
 stays in `src/` but dropped from previews — below the floor.)
+`TerminusBold_xlarge_24x48.bmp` is a clean 2x nearest-neighbor upscale
+of the bold 12x24 glyphs (`ter-u24b.bdf`), reaching toward the
+~32-column range no native Terminus Bold size lands on exactly.
 
 ## Tamzen
 

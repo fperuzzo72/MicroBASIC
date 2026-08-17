@@ -36,12 +36,16 @@ research that'll drive the first implementation decisions.
 
 ## `research/fonts/`
 
-- `previews/` — 9 rendered 1-bit BMPs: the round-2 candidates the project
+- `previews/` — 11 rendered 1-bit BMPs: the round-2 candidates the project
   owner actually confirmed readable on the physical device, narrowed
-  down from the full field, plus two new Terminus Bold sizes added
-  specifically to compare against Tamzen Bold and regular-weight
-  Terminus at the same cell size. Sizes above 24x48 px were dropped —
-  confirmed too large to be worth the lost columns. **480x800
+  down from the full field, plus Terminus Bold at every size that
+  matters for a same-cell comparison against regular Terminus (and
+  Tamzen Bold at small) — small/medium/large (10x20/12x24/16x32, native
+  throughout, Terminus Bold goes up to 32px natively too) and one step
+  further, `xlarge` (24x48, a clean 2x scale of Terminus Bold medium),
+  added to reach into ~32-column territory the native sizes don't quite
+  hit. Sizes above that were dropped in round 3 — confirmed too large to
+  be worth the lost columns. **480x800
   (portrait)**, not the panel's native 800x480 — CPR-vCodex's
   `BmpViewerActivity` displays at `renderer.getScreenWidth/Height()`,
   which is orientation-aware and defaults to `Portrait` (480x800
@@ -61,9 +65,9 @@ research that'll drive the first implementation decisions.
 - `src/` — the font source files (BDF/hex/TTF) the previews were rendered
   from, plus each family's own license file. See `NOTICE.md` for full
   attribution. Carries a few sizes/weights no longer used in
-  `previews/` (Spleen 8x16/32x64, Terminus 16x32, Tamzen regular, the
-  Oldschool IBM TTFs) — kept for reference in case any of them come
-  back into consideration.
+  `previews/` (Spleen 8x16/32x64, Tamzen regular, the Oldschool IBM
+  TTFs) — kept for reference in case any of them come back into
+  consideration.
 
 | Family | size | cell | landscape grid | content cols (minus ruler) |
 |---|---|---|---|---|
@@ -73,13 +77,21 @@ research that'll drive the first implementation decisions.
 | Terminus | medium | 12x24 | 66x20 | 64 |
 | Terminus Bold | medium | 12x24 | 66x20 | 64 |
 | Terminus | large | 16x32 | 50x15 | 48 |
+| Terminus Bold | large | 16x32 | 50x15 | 48 |
 | Spleen | medium | 16x32 | 50x15 | 48 |
 | Unscii | small | 16x32 | 50x15 | 48 |
 | Unscii | medium | 24x48 | 33x10 | 31 |
+| Terminus Bold | xlarge | 24x48 | 33x10 | 31 |
 
 Font pick is not final — the three 10x20 "small" variants (Terminus
 regular/Bold, Tamzen Bold) are there specifically to be compared
-side by side at identical dimensions.
+side by side at identical dimensions, and now so are the two 16x32
+"large" ones (Terminus regular/Bold). `xlarge` (24x48) is a clean 2x
+scale of Terminus Bold's own 12x24, added to see how close to
+32 columns gets without distorting the glyphs — landing at 33 rather
+than exactly 32, since 800px doesn't divide evenly into a 25px cell;
+hitting the number exactly would mean cropping a few pixels of screen
+edge that's under the device bezel anyway.
 
 ## Hardware
 
