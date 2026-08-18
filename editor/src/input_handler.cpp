@@ -5,11 +5,15 @@
 #include "wifi_sync.h"
 #include "dead_keys.h"
 #include "screen_editor.h"
+#include "program_store.h"
+#include "mb_bridge.h"
 
 #include <Arduino.h>
 #include <SDCardManager.h>
 #include <Utf8.h>
 #include <cctype>
+#include <cstdlib>
+#include <strings.h>
 
 // External variables
 extern bool autoReconnectEnabled;
@@ -321,59 +325,231 @@ static void stripQuotes(const char* in, char* out, int outSize) {
   }
 }
 
-// Recognizes LOAD/SAVE/MENU when they're the entire content of the
-// cursor's row (case-insensitive, LOAD/SAVE take a filename argument
-// after a space, optionally quoted) and executes them instead of a plain
-// newline -- direct-mode commands, in the classic BASIC sense, so they
-// don't become part of the saved program text (the row is cleared before
-// running them). Returns false ("not a command, insert a normal newline
-// instead") for anything that doesn't match.
-static bool tryScreenEditorCommand() {
-  char line[SCREEN_EDITOR_COLS + 1];
-  screenEditorGetCurrentLineText(line, sizeof(line));
+// --- LIST/FILES pagination -------------------------------------------------
+// MORE?-style: prints as many lines as fit on screen, then shows "MORE?"
+// and waits -- any keypress clears it and resumes. Nothing here blocks;
+// it's just state checked at the top of handleScreenEditorKey.
 
-  char upper[SCREEN_EDITOR_COLS + 1];
-  int n = 0;
-  for (; line[n]; n++) upper[n] = (char)toupper((unsigned char)line[n]);
-  upper[n] = '\0';
+enum class PagingKind { NONE, LIST, FILES };
+static PagingKind pagingKind = PagingKind::NONE;
+static int pagingNext = 0;
+static int pagingEnd = 0;  // LIST only, exclusive
+static char pagingFiles[MAX_FILES][MAX_FILENAME_LEN];
+static int pagingFileCount = 0;
 
-  if (strcmp(upper, "MENU") == 0) {
-    screenEditorClearRow(screenEditorGetCursorRow());
-    applyOrientationToRenderer(currentOrientation);
-    currentState = UIState::MAIN_MENU;
-    screenDirty = true;
-    return true;
+static void printListLine(int idx) {
+  int num = 0;
+  const char* text = nullptr;
+  if (!programStoreGetByIndex(idx, &num, &text)) return;
+  char buf[MAX_PROGRAM_LINE_LEN + 16];
+  snprintf(buf, sizeof(buf), "%d %s\n", num, text);
+  screenEditorTermPrint(buf);
+}
+
+// Prints until the screen is full or the batch is done. Returns true if
+// "MORE?" is now showing (paging still active), false if finished.
+static bool pageBatch() {
+  int total = (pagingKind == PagingKind::LIST) ? pagingEnd : pagingFileCount;
+  while (pagingNext < total) {
+    if (screenEditorRowsLeftOnScreen() < 2) {
+      screenEditorTermPrint("MORE?");  // no trailing \n -- see continuePaging()
+      return true;
+    }
+    if (pagingKind == PagingKind::LIST) {
+      printListLine(pagingNext);
+    } else {
+      screenEditorTermPrint(pagingFiles[pagingNext]);
+      screenEditorTermPrint("\n");
+    }
+    pagingNext++;
   }
-
-  auto parseArg = [&](const char* keyword) -> const char* {
-    size_t klen = strlen(keyword);
-    if (strncmp(upper, keyword, klen) != 0) return nullptr;
-    if (line[klen] != ' ' && line[klen] != '\0') return nullptr;
-    const char* arg = line + klen;
-    while (*arg == ' ') arg++;
-    return (*arg != '\0') ? arg : nullptr;
-  };
-
-  static char argBuf[MAX_FILENAME_LEN];
-
-  if (const char* arg = parseArg("SAVE")) {
-    stripQuotes(arg, argBuf, sizeof(argBuf));
-    screenEditorClearRow(screenEditorGetCursorRow());
-    screenEditorSave(argBuf);
-    screenDirty = true;
-    return true;
-  }
-  if (const char* arg = parseArg("LOAD")) {
-    stripQuotes(arg, argBuf, sizeof(argBuf));
-    screenEditorLoad(argBuf);  // resets the whole grid itself
-    screenDirty = true;
-    return true;
-  }
-
+  pagingKind = PagingKind::NONE;
   return false;
 }
 
+// The "MORE?" prompt sits alone on the row the cursor was on when
+// pageBatch() printed it (nothing since has touched logical-line-start),
+// so clearing the logical line clears exactly that row and puts the
+// cursor back at its start, ready to keep printing from there.
+static void continuePaging() {
+  screenEditorClearLogicalLine();
+  pageBatch();
+}
+
+static void startListCommand(const char* argStr) {
+  int startNum = -1;
+  int endNum = -1;
+  bool hasRange = false;
+  if (argStr && argStr[0]) {
+    const char* dash = strchr(argStr, '-');
+    if (dash) {
+      startNum = atoi(argStr);
+      endNum = atoi(dash + 1);
+      hasRange = true;
+    } else {
+      startNum = atoi(argStr);
+    }
+  }
+
+  int count = programStoreCount();
+  int startIdx = 0;
+  int endIdxExclusive = count;
+  if (startNum >= 0) {
+    while (startIdx < count) {
+      int num;
+      const char* text;
+      programStoreGetByIndex(startIdx, &num, &text);
+      if (num >= startNum) break;
+      startIdx++;
+    }
+    if (hasRange) {
+      endIdxExclusive = startIdx;
+      while (endIdxExclusive < count) {
+        int num;
+        const char* text;
+        programStoreGetByIndex(endIdxExclusive, &num, &text);
+        if (num > endNum) break;
+        endIdxExclusive++;
+      }
+    }
+  }
+
+  pagingKind = PagingKind::LIST;
+  pagingNext = startIdx;
+  pagingEnd = endIdxExclusive;
+  screenEditorStartNewInputLine();
+  pageBatch();
+}
+
+static void startFilesCommand() {
+  pagingFileCount = 0;
+  auto dir = SdMan.open("/MicroBASIC/programs");
+  if (dir && dir.isDirectory()) {
+    dir.rewindDirectory();
+    char name[256];
+    for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
+      file.getName(name, sizeof(name));
+      int len = (int)strlen(name);
+      if (name[0] != '.' && len > 4 && strcasecmp(name + len - 4, ".bas") == 0 &&
+          pagingFileCount < MAX_FILES) {
+        strncpy(pagingFiles[pagingFileCount], name, MAX_FILENAME_LEN - 1);
+        pagingFiles[pagingFileCount][MAX_FILENAME_LEN - 1] = '\0';
+        pagingFileCount++;
+      }
+      file.close();
+    }
+  }
+  if (dir) dir.close();
+
+  pagingKind = PagingKind::FILES;
+  pagingNext = 0;
+  screenEditorStartNewInputLine();
+  pageBatch();
+}
+
+// --- Enter-key dispatch -----------------------------------------------------
+// A logical line (screenEditorGetLogicalLineText() -- may span several
+// physical rows if it wrapped while typing) is either:
+//   - a numbered BASIC program line ("10 PRINT ...") -> program_store,
+//     stays visible on screen exactly as typed;
+//   - one of this environment's own direct-mode commands (MENU/NEW/RUN/
+//     LIST/FILES/SAVE/LOAD) -- cleared from the visible terminal before
+//     running, same reasoning as the very first LOAD/SAVE/MENU pass;
+//   - anything else -> a My-Basic statement, executed immediately
+//     (mbBridgeRunDirect -- variables persist across separate direct
+//     statements, verified against the real interpreter).
+static void executeLogicalLine(const char* line) {
+  const char* p = line;
+  while (*p == ' ') p++;
+
+  if (isdigit((unsigned char)*p)) {
+    char* endptr = nullptr;
+    long num = strtol(p, &endptr, 10);
+    const char* text = endptr;
+    while (*text == ' ') text++;
+    programStoreSet((int)num, text);
+    screenEditorStartNewInputLine();
+    return;
+  }
+
+  if (!*p) {
+    screenEditorStartNewInputLine();
+    return;
+  }
+
+  char upper[MAX_PROGRAM_LINE_LEN];
+  int n = 0;
+  for (; p[n] && n < (int)sizeof(upper) - 1; n++) upper[n] = (char)toupper((unsigned char)p[n]);
+  upper[n] = '\0';
+
+  auto isWord = [&](const char* w) { return strcmp(upper, w) == 0; };
+  auto wordArg = [&](const char* w) -> const char* {
+    size_t wl = strlen(w);
+    if (strncmp(upper, w, wl) != 0) return nullptr;
+    if (p[wl] != ' ' && p[wl] != '\0') return nullptr;
+    const char* arg = p + wl;
+    while (*arg == ' ') arg++;
+    return arg;  // may point at '\0' if no argument was given
+  };
+
+  if (isWord("MENU")) {
+    screenEditorClearLogicalLine();
+    applyOrientationToRenderer(currentOrientation);
+    currentState = UIState::MAIN_MENU;
+    return;
+  }
+  if (isWord("NEW")) {
+    programStoreClear();
+    screenEditorClearLogicalLine();
+    screenEditorStartNewInputLine();
+    return;
+  }
+  if (isWord("RUN")) {
+    screenEditorStartNewInputLine();
+    mbBridgeRunProgram();
+    screenEditorStartNewInputLine();
+    return;
+  }
+  if (const char* arg = wordArg("LIST")) {
+    screenEditorClearLogicalLine();
+    startListCommand(arg);
+    return;
+  }
+  if (wordArg("FILES")) {
+    screenEditorClearLogicalLine();
+    startFilesCommand();
+    return;
+  }
+  if (const char* arg = wordArg("SAVE")) {
+    static char nameBuf[MAX_FILENAME_LEN];
+    stripQuotes(arg, nameBuf, sizeof(nameBuf));
+    screenEditorClearLogicalLine();
+    bool ok = screenEditorSaveProgram(nameBuf);
+    screenEditorTermPrintLine(ok ? "Saved." : "?Save failed");
+    return;
+  }
+  if (const char* arg = wordArg("LOAD")) {
+    static char nameBuf[MAX_FILENAME_LEN];
+    stripQuotes(arg, nameBuf, sizeof(nameBuf));
+    screenEditorClearLogicalLine();
+    bool ok = screenEditorLoadProgram(nameBuf);
+    screenEditorTermPrintLine(ok ? "Loaded." : "?File not found");
+    return;
+  }
+
+  // Not one of ours -- hand the whole line to My-Basic as a direct-mode statement.
+  screenEditorStartNewInputLine();
+  mbBridgeRunDirect(p);
+  screenEditorStartNewInputLine();
+}
+
 static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {
+  if (pagingKind != PagingKind::NONE) {
+    continuePaging();
+    screenDirty = true;
+    return;
+  }
+
   if (keyCode == HID_KEY_ESCAPE) {
     deadKeyReset();  // discard any pending dead key
     applyOrientationToRenderer(currentOrientation);  // restore the real setting
@@ -383,17 +559,22 @@ static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {
   }
 
   switch (keyCode) {
-    case HID_KEY_LEFT:      screenEditorMoveCursor(0, -1); screenDirty = true; return;
-    case HID_KEY_RIGHT:     screenEditorMoveCursor(0, 1);  screenDirty = true; return;
-    case HID_KEY_UP:        screenEditorMoveCursor(-1, 0); screenDirty = true; return;
-    case HID_KEY_DOWN:      screenEditorMoveCursor(1, 0);  screenDirty = true; return;
-    case HID_KEY_BACKSPACE: screenEditorBackspace();       screenDirty = true; return;
-    case HID_KEY_ENTER:
-      if (!tryScreenEditorCommand()) {
-        screenEditorNewline();
-        screenDirty = true;
-      }
+    case HID_KEY_LEFT:      screenEditorMoveCursor(0, -1);  screenDirty = true; return;
+    case HID_KEY_RIGHT:     screenEditorMoveCursor(0, 1);   screenDirty = true; return;
+    case HID_KEY_UP:        screenEditorMoveCursor(-1, 0);  screenDirty = true; return;
+    case HID_KEY_DOWN:      screenEditorMoveCursor(1, 0);   screenDirty = true; return;
+    case HID_KEY_HOME:      screenEditorGoHome();           screenDirty = true; return;
+    case HID_KEY_END:       screenEditorGoEnd();            screenDirty = true; return;
+    case HID_KEY_PAGE_UP:   screenEditorGoFirstRow();       screenDirty = true; return;
+    case HID_KEY_PAGE_DOWN: screenEditorGoLastRow();        screenDirty = true; return;
+    case HID_KEY_BACKSPACE: screenEditorBackspace();        screenDirty = true; return;
+    case HID_KEY_ENTER: {
+      char line[MAX_PROGRAM_LINE_LEN];
+      screenEditorGetLogicalLineText(line, sizeof(line));
+      executeLogicalLine(line);
+      screenDirty = true;
       return;
+    }
   }
 
   // Printable character — same US-International dead key engine as the
@@ -519,15 +700,17 @@ static void dispatchEvent(const KeyEvent& event) {
         screenDirty = true;
       } else if (event.keyCode == HID_KEY_ENTER) {
         if (mainMenuSelection == 0) {
-          refreshFileList();
-          currentState = UIState::FILE_BROWSER;
-          screenDirty = true;
-        } else if (mainMenuSelection == 1) {
-          // SCREEN 1 grid editor -- see MicroBASIC repo's
-          // docs/DEVELOPMENT_LOG.md.
+          // MicroBASIC: the SCREEN 0-3 terminal -- see MicroBASIC repo's
+          // docs/DEVELOPMENT_LOG.md. Only the terminal display resets;
+          // whatever's in program_store (LOADed or typed earlier this
+          // session) stays put.
           screenEditorReset();
           applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
           currentState = UIState::SCREEN_EDITOR;
+          screenDirty = true;
+        } else if (mainMenuSelection == 1) {
+          refreshFileList();
+          currentState = UIState::FILE_BROWSER;
           screenDirty = true;
         } else if (mainMenuSelection == 2) {
           // "New Program" -- the original prose editor ("New Note"),

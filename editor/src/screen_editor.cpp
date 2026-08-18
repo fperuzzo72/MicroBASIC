@@ -1,28 +1,62 @@
 #include "screen_editor.h"
 
 #include "config.h"
+#include "program_store.h"
 #include "sd_backup.h"
 #include <SDCardManager.h>
 #include <Utf8.h>
 #include <cstdio>
 #include <cstring>
 
-static uint32_t grid[SCREEN_EDITOR_ROWS][SCREEN_EDITOR_COLS];
+struct ScreenModeInfo {
+  int cols, rows, cellW, cellH, marginX, fontId;
+};
+
+// (800 - cols*cellW)/2 margin, verified to land on exactly 16px for modes
+// 0-2 and 0 for mode 3 -- see README's "Column math". Row math needs no
+// margin in any mode (480 divides evenly by every cellH).
+static const ScreenModeInfo MODES[4] = {
+    {32, 10, 24, 48, 16, FONT_SCREEN_MONO_0},
+    {48, 15, 16, 32, 16, FONT_SCREEN_MONO_1},
+    {64, 20, 12, 24, 16, FONT_SCREEN_MONO_2},
+    {80, 24, 10, 20, 0, FONT_SCREEN_MONO_3},
+};
+
+static int currentMode = 1;  // SCREEN 1 default
+
+static uint32_t grid[SCREEN_EDITOR_MAX_ROWS][SCREEN_EDITOR_MAX_COLS];
 static int cursorRow = 0;
 static int cursorCol = 0;
+static int logicalLineStartRow = 0;
+
+int screenEditorGetMode() { return currentMode; }
+int screenEditorCols() { return MODES[currentMode].cols; }
+int screenEditorRows() { return MODES[currentMode].rows; }
+int screenEditorCellW() { return MODES[currentMode].cellW; }
+int screenEditorCellH() { return MODES[currentMode].cellH; }
+int screenEditorMarginX() { return MODES[currentMode].marginX; }
+int screenEditorFontId() { return MODES[currentMode].fontId; }
 
 void screenEditorReset() {
-  for (int r = 0; r < SCREEN_EDITOR_ROWS; r++) {
-    for (int c = 0; c < SCREEN_EDITOR_COLS; c++) {
+  int cols = screenEditorCols();
+  int rows = screenEditorRows();
+  for (int r = 0; r < rows; r++)
+    for (int c = 0; c < cols; c++)
       grid[r][c] = ' ';
-    }
-  }
   cursorRow = 0;
   cursorCol = 0;
+  logicalLineStartRow = 0;
+}
+
+void screenEditorSetMode(int n) {
+  if (n < 0) n = 0;
+  if (n > 3) n = 3;
+  currentMode = n;
+  screenEditorReset();
 }
 
 uint32_t screenEditorGetCell(int row, int col) {
-  if (row < 0 || row >= SCREEN_EDITOR_ROWS || col < 0 || col >= SCREEN_EDITOR_COLS) return ' ';
+  if (row < 0 || row >= screenEditorRows() || col < 0 || col >= screenEditorCols()) return ' ';
   return grid[row][col];
 }
 
@@ -30,64 +64,144 @@ int screenEditorGetCursorRow() { return cursorRow; }
 int screenEditorGetCursorCol() { return cursorCol; }
 
 static void clampCursor() {
+  int cols = screenEditorCols();
+  int rows = screenEditorRows();
   if (cursorRow < 0) cursorRow = 0;
-  if (cursorRow >= SCREEN_EDITOR_ROWS) cursorRow = SCREEN_EDITOR_ROWS - 1;
+  if (cursorRow >= rows) cursorRow = rows - 1;
   if (cursorCol < 0) cursorCol = 0;
-  if (cursorCol >= SCREEN_EDITOR_COLS) cursorCol = SCREEN_EDITOR_COLS - 1;
+  if (cursorCol >= cols) cursorCol = cols - 1;
 }
 
 void screenEditorMoveCursor(int dRow, int dCol) {
   cursorRow += dRow;
   cursorCol += dCol;
   clampCursor();
+  logicalLineStartRow = cursorRow;  // deliberate navigation always breaks continuation
+}
+
+void screenEditorGoHome() {
+  cursorCol = 0;
+  logicalLineStartRow = cursorRow;
+}
+
+void screenEditorGoEnd() {
+  int cols = screenEditorCols();
+  int last = -1;
+  for (int c = 0; c < cols; c++)
+    if (grid[cursorRow][c] != (uint32_t)' ') last = c;
+  cursorCol = (last < 0) ? 0 : ((last + 1 < cols) ? last + 1 : cols - 1);
+  logicalLineStartRow = cursorRow;
+}
+
+void screenEditorGoFirstRow() {
+  cursorRow = 0;
+  clampCursor();
+  logicalLineStartRow = cursorRow;
+}
+
+void screenEditorGoLastRow() {
+  cursorRow = screenEditorRows() - 1;
+  clampCursor();
+  logicalLineStartRow = cursorRow;
+}
+
+static void scrollUp() {
+  int cols = screenEditorCols();
+  int rows = screenEditorRows();
+  for (int r = 0; r < rows - 1; r++)
+    for (int c = 0; c < cols; c++)
+      grid[r][c] = grid[r + 1][c];
+  for (int c = 0; c < cols; c++) grid[rows - 1][c] = ' ';
+  if (logicalLineStartRow > 0) logicalLineStartRow--;
+  // else: the true start of the in-progress logical line already scrolled
+  // off (an extremely long wrapped line) -- best effort, not reconstructible.
 }
 
 void screenEditorInsertCodepoint(uint32_t cp) {
+  int cols = screenEditorCols();
+  int rows = screenEditorRows();
   grid[cursorRow][cursorCol] = cp;
   cursorCol++;
-  if (cursorCol >= SCREEN_EDITOR_COLS) {
+  if (cursorCol >= cols) {
     cursorCol = 0;
-    if (cursorRow < SCREEN_EDITOR_ROWS - 1) cursorRow++;
-    else cursorCol = SCREEN_EDITOR_COLS - 1;  // last cell of last row: stop advancing
+    if (cursorRow < rows - 1) {
+      cursorRow++;
+    } else {
+      scrollUp();  // cursorRow stays at rows-1
+    }
   }
 }
 
 void screenEditorBackspace() {
+  int cols = screenEditorCols();
   if (cursorCol > 0) {
     cursorCol--;
   } else if (cursorRow > 0) {
     cursorRow--;
-    cursorCol = SCREEN_EDITOR_COLS - 1;
+    cursorCol = cols - 1;
   } else {
     return;  // already at the very first cell
   }
   grid[cursorRow][cursorCol] = ' ';
 }
 
-void screenEditorNewline() {
-  cursorCol = 0;
-  if (cursorRow < SCREEN_EDITOR_ROWS - 1) cursorRow++;
-}
-
-void screenEditorClearRow(int row) {
-  if (row < 0 || row >= SCREEN_EDITOR_ROWS) return;
-  for (int c = 0; c < SCREEN_EDITOR_COLS; c++) grid[row][c] = ' ';
-}
-
-void screenEditorGetCurrentLineText(char* out, int outSize) {
+void screenEditorGetLogicalLineText(char* out, int outSize) {
+  int cols = screenEditorCols();
   int n = 0;
   int lastNonSpace = -1;
-  for (int c = 0; c < SCREEN_EDITOR_COLS && n < outSize - 1; c++) {
-    uint32_t cp = grid[cursorRow][c];
-    char ch = (cp < 0x80) ? (char)cp : '?';
-    out[n] = ch;
-    if (ch != ' ') lastNonSpace = n;
-    n++;
+  for (int r = logicalLineStartRow; r <= cursorRow && n < outSize - 1; r++) {
+    for (int c = 0; c < cols && n < outSize - 1; c++) {
+      uint32_t cp = grid[r][c];
+      char ch = (cp < 0x80) ? (char)cp : '?';
+      out[n] = ch;
+      if (ch != ' ') lastNonSpace = n;
+      n++;
+    }
   }
   out[lastNonSpace + 1] = '\0';
 }
 
-// --- LOAD/SAVE ------------------------------------------------------------
+void screenEditorClearLogicalLine() {
+  int cols = screenEditorCols();
+  for (int r = logicalLineStartRow; r <= cursorRow; r++)
+    for (int c = 0; c < cols; c++) grid[r][c] = ' ';
+  cursorRow = logicalLineStartRow;
+  cursorCol = 0;
+}
+
+void screenEditorStartNewInputLine() {
+  int rows = screenEditorRows();
+  cursorCol = 0;
+  if (cursorRow < rows - 1) {
+    cursorRow++;
+  } else {
+    scrollUp();
+  }
+  logicalLineStartRow = cursorRow;
+}
+
+int screenEditorRowsLeftOnScreen() {
+  return screenEditorRows() - cursorRow;
+}
+
+void screenEditorTermPrint(const char* utf8Text) {
+  const unsigned char* p = (const unsigned char*)utf8Text;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(&p)) != 0) {
+    if (cp == '\n') {
+      screenEditorStartNewInputLine();
+    } else {
+      screenEditorInsertCodepoint(cp);
+    }
+  }
+}
+
+void screenEditorTermPrintLine(const char* utf8Text) {
+  screenEditorTermPrint(utf8Text);
+  screenEditorTermPrint("\n");
+}
+
+// --- SAVE/LOAD -------------------------------------------------------------
 
 static const char* PROGRAMS_DIR = "/MicroBASIC/programs";
 
@@ -102,8 +216,8 @@ static void sanitizeFilename(const char* name, char* out, int outSize) {
 static void buildProgramPath(const char* name, char* path, int pathSize) {
   char safe[MAX_FILENAME_LEN];
   sanitizeFilename(name, safe, sizeof(safe));
-  bool hasExt = strlen(safe) > 4 && strcmp(safe + strlen(safe) - 4, ".txt") == 0;
-  snprintf(path, pathSize, "%s/%s%s", PROGRAMS_DIR, safe, hasExt ? "" : ".txt");
+  bool hasExt = strlen(safe) > 4 && strcmp(safe + strlen(safe) - 4, ".bas") == 0;
+  snprintf(path, pathSize, "%s/%s%s", PROGRAMS_DIR, safe, hasExt ? "" : ".bas");
 }
 
 static void ensureProgramsDir() {
@@ -111,76 +225,35 @@ static void ensureProgramsDir() {
   if (!SdMan.exists(PROGRAMS_DIR)) SdMan.mkdir(PROGRAMS_DIR);
 }
 
-static void utf8Encode(uint32_t cp, char out[5]) {
-  if (cp < 0x80) {
-    out[0] = (char)cp;
-    out[1] = '\0';
-  } else if (cp < 0x800) {
-    out[0] = (char)(0xC0 | (cp >> 6));
-    out[1] = (char)(0x80 | (cp & 0x3F));
-    out[2] = '\0';
-  } else {
-    out[0] = (char)(0xE0 | (cp >> 12));
-    out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-    out[2] = (char)(0x80 | (cp & 0x3F));
-    out[3] = '\0';
-  }
-}
-
-bool screenEditorSave(const char* name) {
+bool screenEditorSaveProgram(const char* name) {
   if (!name || !name[0]) return false;
   ensureProgramsDir();
 
-  static char buf[SCREEN_EDITOR_ROWS * (SCREEN_EDITOR_COLS * 4 + 1) + 1];
-  int pos = 0;
-  for (int r = 0; r < SCREEN_EDITOR_ROWS; r++) {
-    int lastNonSpace = -1;
-    int rowStart = pos;
-    for (int c = 0; c < SCREEN_EDITOR_COLS; c++) {
-      char enc[5];
-      utf8Encode(grid[r][c], enc);
-      for (char* p = enc; *p && pos < (int)sizeof(buf) - 2; p++) buf[pos++] = *p;
-      if (grid[r][c] != ' ') lastNonSpace = pos;
-    }
-    pos = (lastNonSpace >= 0) ? lastNonSpace : rowStart;  // trim trailing spaces
-    if (pos < (int)sizeof(buf) - 2) buf[pos++] = '\n';
+  static char buf[PROGRAM_TEXT_BUFFER_SIZE];
+  if (!programStoreSerialize(buf, sizeof(buf))) {
+    DBG_PRINTLN("[MB] Save failed: program text too large for buffer");
+    return false;
   }
-  buf[pos] = '\0';
 
   char path[80];
   buildProgramPath(name, path, sizeof(path));
   bool ok = sdWriteFile(path, buf);
-  DBG_PRINTF("[SCREEN] Save %s -> %s\n", path, ok ? "OK" : "FAILED");
+  DBG_PRINTF("[MB] Save %s -> %s\n", path, ok ? "OK" : "FAILED");
   return ok;
 }
 
-bool screenEditorLoad(const char* name) {
+bool screenEditorLoadProgram(const char* name) {
   if (!name || !name[0]) return false;
   char path[80];
   buildProgramPath(name, path, sizeof(path));
 
-  static char buf[SCREEN_EDITOR_ROWS * (SCREEN_EDITOR_COLS * 4 + 1) + 1];
+  static char buf[PROGRAM_TEXT_BUFFER_SIZE];
   if (!sdReadFile(path, buf, sizeof(buf))) {
-    DBG_PRINTF("[SCREEN] Load %s -> FAILED (not found)\n", path);
+    DBG_PRINTF("[MB] Load %s -> FAILED (not found)\n", path);
     return false;
   }
 
-  screenEditorReset();
-  const unsigned char* p = (const unsigned char*)buf;
-  for (int r = 0; r < SCREEN_EDITOR_ROWS; r++) {
-    int c = 0;
-    uint32_t cp;
-    while (c < SCREEN_EDITOR_COLS && (cp = utf8NextCodepoint(&p)) != 0 && cp != '\n') {
-      grid[r][c++] = cp;
-    }
-    // If the line was longer than the grid width, skip the rest of it.
-    if (cp != 0 && cp != '\n') {
-      while ((cp = utf8NextCodepoint(&p)) != 0 && cp != '\n') {}
-    }
-    if (cp == 0) break;  // end of file
-  }
-  cursorRow = 0;
-  cursorCol = 0;
-  DBG_PRINTF("[SCREEN] Load %s -> OK\n", path);
+  programStoreLoadSerialized(buf);
+  DBG_PRINTF("[MB] Load %s -> OK (%d lines)\n", path, programStoreCount());
   return true;
 }

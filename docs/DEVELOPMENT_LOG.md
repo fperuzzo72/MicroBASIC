@@ -453,3 +453,207 @@ No on-screen success/failure feedback yet for LOAD/SAVE (only
 `DBG_PRINTF` to serial) — the grid uses the full 480px panel height with
 no spare row for a status line. Worth a real solution once this is used
 for real; a one-line transient overlay is the likely shape of it.
+
+(Superseded by the My-Basic integration below — SAVE/LOAD now persist
+the actual program, not this grid buffer, and do print on-screen status.)
+
+## My-Basic wired in for real: SCREEN_EDITOR becomes a terminal
+
+The big one. Four things decided together, then implemented in one pass:
+wire up the real interpreter, boot straight into it (Back/`MENU` as the
+guaranteed way out, now that both exist), make Home's entry point for it
+"MicroBASIC" instead of "Screen Editor" (first in the list — it's the
+project's identity now, not just another tool), and rebuild the SCREEN
+0/1/2/3 fonts for real (previously only SCREEN 1/16x32 existed as
+firmware; the other three were still preview-only bitmaps).
+
+### GOTO/GOSUB target a label, not a line number — verified, not assumed
+
+Before writing any integration code: does My-Basic's *language* actually
+support classic `10 PRINT "X"` / `GOTO 10` line-number semantics, or was
+that only ever the shell's own bookkeeping? Read `shell/main.c` (My-
+Basic's reference REPL) first, and it was a real surprise: `_do_line()`
+there has no line-number concept *in the language* at all — anything
+that isn't one of the shell's own meta-commands (HELP/CLS/NEW/RUN/BYE/
+LIST/EDIT/LOAD/SAVE/KILL/DIR) just gets appended to a plain ordered
+array of text lines, and `EDIT n` edits by *array position*, not by a
+number embedded in the line's own text.
+
+`my_basic.h`'s error codes confirmed the real mechanism:
+`SE_RN_LABEL_DOES_NOT_EXIST`, `SE_RN_JUMP_LABEL_EXPECTED` — My-Basic's
+GOTO/GOSUB targets are alphabetic labels (`mylabel:` ... `goto mylabel`),
+like a structured-BASIC dialect, not classic numbered lines. Confirmed
+empirically rather than trusting the grep: compiled `my_basic.c` natively
+on the host and ran two test programs. `10:` (a bare numeric label)
+fails to parse — `ERROR: e=48 row=1 col=2 msg=Invalid expression`.
+`L10:` (letter-prefixed) works fine, including a forward `GOTO L20`
+correctly skipping the line in between. Also verified, since it mattered
+for the direct-mode design below: variables persist across *separate*
+`mb_load_string(s, line, true)` + `mb_run(s, true)` call pairs (`A = 5`
+then, as a fully separate call, `PRINT A` correctly prints `5`) — so a
+REPL-style "each Enter runs its own statement" loop doesn't need to
+reset anything between statements to keep that continuity.
+
+So: this project keeps its own classic line-numbered program store
+(`program_store.h/.cpp` — sorted array of `{number, text}`, insert/
+replace-in-place/delete-on-blank-text, exactly the "type the number
+alone to remove it" convention), and only at `RUN` time translates it
+into what My-Basic actually wants: `programStoreBuildRunSource()` prefixes
+every stored line with its own `LN:` label and rewrites any `GOTO n` /
+`GOSUB n` found in the text (skipping string literals, so
+`PRINT "GOTO 10"` is left alone) to `GOTO Ln` / `GOSUB Ln`. Classic
+`GOTO 10` keeps working exactly as typed; the label indirection is
+invisible.
+
+### The terminal model
+
+SCREEN_EDITOR stopped being a static persistent grid you free-type into
+(the very first test-firmware pass) and became an actual scrolling
+terminal, matching how MSX BASIC (and every other line-number BASIC)
+really worked: the *screen* is temporary/transient except for what's
+been explicitly committed to the program store by pressing Enter on a
+numbered line — print past the bottom row and the top just scrolls off
+and is gone, no scrollback. `LIST` can always reconstruct any numbered
+line from `program_store` regardless of what's currently on screen; nothing
+else survives a scroll.
+
+**Logical lines can span multiple physical rows.** If a line is long
+enough to wrap while typing (hits the last column, cursor auto-advances
+to the next row), that's still *one* line as far as Enter/number-parsing
+is concerned — `screenEditorInsertCodepoint()`'s wrap-to-next-row does
+*not* reset which row counts as "the start of the current line."
+Deliberately *moving* the cursor (any arrow key, Home/End, PgUp/PgDn)
+does reset it — landing on a different row via explicit navigation makes
+that row its own independent line reference point, matching the classic
+"whatever physical row the cursor sits on when Enter is pressed gets
+read as the line" screen-editor trick, generalized to also handle the
+multi-row-wrap case. `screenEditorGetLogicalLineText()` concatenates
+from that tracked start row through the cursor's row when Enter is
+pressed; `screenEditorClearLogicalLine()` clears that same span (used for
+this environment's own direct-mode commands, so their text doesn't
+linger after running — numbered program lines are the opposite: they
+stay visible, matching classic behavior).
+
+Home/End operate on the current physical row (column 0 / just past the
+last non-blank column) — not the logical multi-row line — matching how
+a character-grid screen editor conventionally behaves. PgUp/PgDn jump to
+the first/last row of the currently visible screen (no scrollback to
+page through, so "first/last line" is unambiguous).
+
+### SCREEN 0/1/2/3 fonts, for real
+
+Only SCREEN 1 (16x32) existed as an actual `EpdFontData` header before
+this pass — the other three sizes were preview-only BMPs from the font
+research. `research/fonts/tools/emit_epdfont_header.py` got rewritten to
+import `generate_screen_fonts.py`'s actual glyph classes directly
+(`ScaledHexFont` for the clean-integer-scale 48-col/32-col sizes,
+`UnsciiScreenFont` — the one with the area-coverage resize + stem-width
+cap + ç/Ç fix — for the 80-col/64-col sizes) instead of re-implementing
+scaling a second time, so the firmware fonts are pixel-identical to the
+already-validated preview images, not a second potentially-diverging
+copy. `SCREEN n` is a registered My-Basic function (`mb_register_func`,
+*not* the `mb_reg_fun` macro — that one stringifies the C function's own
+name as the BASIC-visible command, which isn't what you want when you
+need the callable name to be exactly `SCREEN`) that calls
+`screenEditorSetMode()`, which swaps the active font ID, grid cols/rows/
+cell size/margin, and clears the terminal (old content wouldn't line up
+under a different cell grid). `CLS` is a second registered function,
+finally giving the earlier "just add CLS" question its real answer —
+it's a one-line native-function binding now, not a hand-parsed special
+case like `LOAD`/`SAVE`/`MENU` were in the first pass.
+
+### LOAD/SAVE/LIST/FILES/RUN/NEW/MENU
+
+All direct-mode commands, same "typed as the whole logical line, then
+Enter" recognition as the first pass, extended:
+
+- `LOAD "name.bas"` / `SAVE "name.bas"` (quotes optional, `.bas`
+  appended if missing) now serialize `program_store` itself (`N text`
+  per line) to/from `/MicroBASIC/programs/`, not the old grid-buffer
+  dump — and finally print `Saved.`/`Loaded.` or an error to the
+  terminal, closing the "no on-screen feedback" gap the previous pass
+  left open.
+- `LIST` (optionally `LIST 30` — from line 30 to the end — or
+  `LIST 10-200` — that inclusive range) and `FILES` (the `.bas` files in
+  `/MicroBASIC/programs/`) both print through a shared MORE?-paginated
+  batch printer: fills the screen, and if more remains, prints `MORE?`
+  (no trailing newline — the next keypress clears exactly that row via
+  `screenEditorClearLogicalLine()`, since nothing since printing it moved
+  the logical-line-start tracked above, and resumes). Nothing blocks;
+  it's a tiny state machine (`PagingKind` + a resume index) checked at
+  the top of every SCREEN_EDITOR key event, same non-blocking
+  event-driven shape as the rest of this codebase.
+- `RUN` builds the label-translated source and executes it fresh
+  (`mb_reset(&bas, false, true)` — clears variables, keeps registered
+  functions — classic BASIC `RUN` semantics, deliberately *not* the same
+  continuity direct-mode statements get).
+- `NEW` clears `program_store` (not the terminal's own visible history).
+- `MENU` — unchanged from the first pass, now doubly load-bearing since
+  boot goes straight here (see below).
+
+Anything that isn't one of the above and isn't a numbered line goes
+straight to My-Basic as a direct-mode statement (`mbBridgeRunDirect()`),
+preserving variables across separate statements the way the native-test
+above confirmed.
+
+### Boots straight into MicroBASIC
+
+`currentState`'s initial value in `main.cpp` is now `UIState::SCREEN_EDITOR`
+instead of `MAIN_MENU`. Found a real bug while wiring this up:
+`updateScreen()`'s orientation-apply block compares `currentOrientation`
+against a `lastOrientation` static that defaults to `Portrait` — fine
+when SCREEN_EDITOR was only ever entered *from* the menu (by then
+`lastOrientation` was already synced to the user's real setting), but
+booting directly into it meant that on a device with any saved
+non-Portrait orientation, the very first `updateScreen()` call would see
+`currentOrientation != lastOrientation` and immediately overwrite the
+boot-time `LandscapeCounterClockwise` override with the user's real
+saved orientation before the screen ever painted. Fixed by skipping that
+block outright while `currentState == UIState::SCREEN_EDITOR` (a guard
+this project actually had in an earlier draft and removed as
+"provably unnecessary" — true under the old menu-entry-only assumption,
+false once boot could land here directly; reinstated with the reasoning
+written down this time).
+
+### Two build problems specific to vendoring My-Basic on this toolchain
+
+`editor/lib/MyBasic/` carries `my_basic.h` and `my_basic.c` (renamed to
+`my_basic_src.inc`, see below) from
+[paladin-t/my_basic](https://github.com/paladin-t/my_basic), MIT.
+
+1. **`_lock_t` redefinition.** My-Basic's own `my_basic.c` declares
+   `typedef short _lock_t;` for a small internal reference-counting type
+   — invisible in `my_basic.h`'s public API, confirmed by grep before
+   touching anything. ESP-IDF's newlib (`sys/lock.h`, pulled in
+   transitively via `<assert.h>`) already defines `_lock_t` as a pointer
+   type for real OS mutexes. Same name, unrelated purpose, hard
+   redefinition error. Fixed by renaming every occurrence in the vendored
+   source to `_mb_lock_t` (Python regex with a `\b` word boundary —
+   macOS's default BSD `sed` does't support `\b` the way GNU sed does,
+   quietly matched zero occurrences on the first attempt).
+2. **Upstream's own warnings, escalated to errors by this project's
+   build flags.** `missing-braces`, `unused-but-set-variable`,
+   `unused-function`, integer-overflow-in-a-macro warnings, an
+   `implicit-fallthrough` — all harmless, all upstream's code, none of
+   them this project's to fix. Rather than patch a vendored file to
+   satisfy a warning level it was never written against, the actual
+   `my_basic.c` (renamed `my_basic_src.inc` so PlatformIO's library
+   dependency finder doesn't also try to compile it directly and
+   double-link every symbol) gets `#include`d from a 15-line
+   `my_basic_impl.c` wrapper that brackets the include in
+   `#pragma GCC diagnostic ignored` for exactly those warnings.
+3. **RAM overflow at link time**, unrelated to My-Basic itself — this
+   project's own static buffers. First-pass sizing (`MAX_PROGRAM_LINES`
+   200 × `MAX_PROGRAM_LINE_LEN` 200, plus *three separate* 16KB static
+   buffers for save/load/run-source) overflowed the ESP32-C3's DRAM
+   segment by ~12.4KB at link time. Trimmed to 100 × 160 for the program
+   store and 8KB per buffer — a real ceiling on program size now (a
+   full-length program near that cap won't fit through the serialize/
+   run-source buffers, failing gracefully rather than crashing), but
+   comfortable for anything reasonable on a device this size. Final
+   build: 188KB/327KB RAM (57%), 2.06MB/6.25MB flash (31%) — plenty of
+   headroom left in both.
+
+Flashed as a slot-only write to `0x650000` again, same reasoning as
+every pass before this one (leaves the reader and NVS-stored BLE
+pairing untouched).

@@ -89,6 +89,23 @@ reference.
   must carry the same attribution and share-alike terms. Never made it
   into a narrowed-down round; not part of the final decision.
 
+## My-Basic — the BASIC interpreter core
+
+`editor/lib/MyBasic/my_basic.h` and `my_basic_src.inc` (renamed from
+upstream's `my_basic.c` — see below), from
+[paladin-t/my_basic](https://github.com/paladin-t/my_basic) by Tony Wang.
+MIT — the full notice is preserved unchanged in each file's own header
+comment (not duplicated here).
+
+Two local modifications to `my_basic_src.inc`, both documented inline
+and in `docs/DEVELOPMENT_LOG.md`: the internal (non-public-API) `_lock_t`
+typedef is renamed to `_mb_lock_t` throughout, to resolve a collision
+with ESP-IDF newlib's own `_lock_t`; and the file itself is renamed from
+`my_basic.c` to `my_basic_src.inc` so PlatformIO's library dependency
+finder doesn't compile it a second time on its own (it's `#include`d
+once, deliberately, from `my_basic_impl.c`). Neither change is a
+functional modification to the interpreter itself.
+
 ## MSX ROM font (HotBit) — never in `previews/`, never will be
 
 A preview was rendered once, for personal comparison only, from the

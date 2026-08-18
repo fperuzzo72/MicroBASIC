@@ -2,50 +2,87 @@
 
 #include <cstdint>
 
-// MicroBASIC's SCREEN 1 grid editor -- first test pass, no BASIC
-// interpreter yet, just a fixed 48x15 character-cell text surface. See
-// the MicroBASIC repo's docs/DEVELOPMENT_LOG.md for the SCREEN mode spec
-// this implements (font, cell size, centering).
+// MicroBASIC's SCREEN 0/1/2/3 terminal: a scrolling character-cell
+// display (like a classic 1980s BASIC's screen) plus cursor/logical-line
+// tracking for the "type a numbered line, it's program text; type
+// anything else, it runs immediately" editing model. See the MicroBASIC
+// repo's docs/DEVELOPMENT_LOG.md for the full spec and the My-Basic
+// integration this feeds into.
 //
-// No scrolling/paging in this first pass: the cursor simply stops
-// advancing at the last cell rather than wrapping/scrolling the grid.
+// Scrolling: typing or printing past the last row shifts every row up by
+// one and clears the new bottom row -- whatever scrolled off is gone
+// (this is a terminal, not a persistent buffer). The actual PROGRAM lives
+// in program_store.h, entirely separate from what's currently visible.
 
+void screenEditorSetMode(int n);  // 0-3, see README's SCREEN table
+int screenEditorGetMode();
+int screenEditorCols();
+int screenEditorRows();
+int screenEditorCellW();
+int screenEditorCellH();
+int screenEditorMarginX();
+int screenEditorFontId();
+
+// Clears the terminal (not the program store) and resets cursor/logical-
+// line tracking. Does NOT change SCREEN mode.
 void screenEditorReset();
 
 uint32_t screenEditorGetCell(int row, int col);
 int screenEditorGetCursorRow();
 int screenEditorGetCursorCol();
 
-// dRow/dCol: -1/0/+1. Clamps at grid edges (no wraparound).
+// Cursor navigation -- every one of these resets "logical line start" to
+// wherever the cursor ends up (see screenEditorGetLogicalLineText): moving
+// the cursor deliberately means whatever row you land on is treated as
+// its own independent line from here, breaking any in-progress multi-row
+// continuation.
 void screenEditorMoveCursor(int dRow, int dCol);
+void screenEditorGoHome();      // column 0 of the current row
+void screenEditorGoEnd();       // just past the last non-blank column of the current row
+void screenEditorGoFirstRow();  // PgUp
+void screenEditorGoLastRow();   // PgDn
 
-// Writes at the cursor and advances it (wraps to the start of the next
-// row at the last column; stops at the last cell of the last row).
+// Typing/backspacing wrap between rows *without* resetting logical-line
+// start -- this is what lets one BASIC line span multiple physical rows
+// (because it was long enough to wrap while typing) and still be read as
+// ONE line when Enter is eventually pressed on the wrapped continuation.
+// Scrolls the terminal when insertion wraps past the last row.
 void screenEditorInsertCodepoint(uint32_t cp);
-
-// Moves the cursor back one cell (wrapping to the end of the previous
-// row) and clears that cell.
 void screenEditorBackspace();
 
-// Moves the cursor to column 0 of the next row (stops at the last row).
-void screenEditorNewline();
+// Concatenates every row from the logical-line start through the cursor's
+// row (ASCII only -- non-ASCII becomes '?'; command/line-number parsing
+// never needs more than that), trailing spaces trimmed only on the last
+// row. This is what actually gets parsed when Enter is pressed.
+void screenEditorGetLogicalLineText(char* out, int outSize);
 
-// Clears one row back to spaces (used before executing a LOAD/SAVE/MENU
-// command line, so the command text itself doesn't end up saved as if it
-// were program content).
-void screenEditorClearRow(int row);
+// Clears every row of the current logical line back to spaces and moves
+// the cursor to column 0 of the first of those rows -- used for direct-
+// mode commands (MENU/LIST/RUN/...), which shouldn't linger on screen
+// the way an accepted numbered program line does.
+void screenEditorClearLogicalLine();
 
-// Copies the cursor's row into `out` as plain ASCII (non-ASCII codepoints
-// become '?'), trimmed of trailing spaces, always null-terminated. Used
-// for recognizing LOAD/SAVE/MENU command lines -- those keywords and
-// filenames are ASCII-only, so this is only for command *recognition*,
-// not general text export.
-void screenEditorGetCurrentLineText(char* out, int outSize);
+// Moves to column 0 of the next row (scrolling if the cursor was on the
+// last row) and makes that new row the logical-line start -- call after
+// finishing whatever Enter triggered, to begin fresh input.
+void screenEditorStartNewInputLine();
 
-// Saves/loads the whole grid as plain UTF-8 text (one line per row,
-// trailing spaces trimmed) under /MicroBASIC/programs/<name>.txt --
-// `name` is sanitized (no '/', truncated) and gets a .txt extension if it
-// doesn't already have one. Load resets the grid and cursor first;
-// missing file / IO error returns false and leaves the grid untouched.
-bool screenEditorSave(const char* name);
-bool screenEditorLoad(const char* name);
+// How many rows remain from the cursor's row to the bottom of the
+// screen, inclusive -- for the LIST/FILES pagination logic in
+// input_handler.cpp to know when to stop and show "MORE?".
+int screenEditorRowsLeftOnScreen();
+
+// --- Terminal output (BASIC PRINT, error messages, MORE? etc.) ---
+// Prints UTF-8 text at the cursor. Embedded '\n' moves to column 0 of the
+// next row (scrolling as needed); otherwise wraps at the column boundary
+// exactly like typing does. No word-wrap -- fixed character grid, same as
+// the rest of this project.
+void screenEditorTermPrint(const char* utf8Text);
+void screenEditorTermPrintLine(const char* utf8Text);  // + trailing newline
+
+// --- SAVE/LOAD: the actual program (program_store.h) as a .bas file ---
+// `name` gets a .bas extension appended if it doesn't already have one,
+// same sanitizing as the original grid-based save (no '/', truncated).
+// Stored under /MicroBASIC/programs/ on the SD card.
+bool screenEditorSaveProgram(const char* name);
+bool screenEditorLoadProgram(const char* name);  // replaces the program store

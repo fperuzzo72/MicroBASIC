@@ -101,20 +101,30 @@ static constexpr int MAX_LINES = 1024;
 #define FONT_SMALL   (-1246724383)   // UI_10_FONT_ID (ubuntu 10)
 #define FONT_LARGE   (-1422711852)   // NOTOSANS_16_FONT_ID
 
-// Screen Editor's monospace font -- MicroBASIC's decided SCREEN 1 default
-// (see MicroBASIC repo's docs/DEVELOPMENT_LOG.md). Arbitrary ID, just needs
-// to not collide with the four above.
-#define FONT_SCREEN_MONO (-2000000001)
+// Screen Editor's monospace fonts -- one per SCREEN mode (see MicroBASIC
+// repo's docs/DEVELOPMENT_LOG.md for the full spec). Arbitrary IDs, just
+// need to not collide with the four prose-editor fonts above or each other.
+#define FONT_SCREEN_MONO_0 (-2000000001)  // SCREEN 0, 32 col, 24x48
+#define FONT_SCREEN_MONO_1 (-2000000002)  // SCREEN 1, 48 col, 16x32 (default)
+#define FONT_SCREEN_MONO_2 (-2000000003)  // SCREEN 2, 64 col, 12x24
+#define FONT_SCREEN_MONO_3 (-2000000004)  // SCREEN 3, 80 col, 10x20
 
-// --- Screen Editor grid (SCREEN 1: 48x15 monospace, Unscii 16x32px cells) ---
-// Content is exactly 48*16=768px wide, centered in the 800px landscape
-// panel width (16px margin each side) and exactly 15*32=480px tall (the
-// full panel height, no vertical margin -- see MicroBASIC's SCREEN table).
-static constexpr int SCREEN_EDITOR_COLS = 48;
-static constexpr int SCREEN_EDITOR_ROWS = 15;
-static constexpr int SCREEN_EDITOR_CELL_W = 16;
-static constexpr int SCREEN_EDITOR_CELL_H = 32;
-static constexpr int SCREEN_EDITOR_MARGIN_X = 16;
+// --- Screen Editor: max grid size across all 4 SCREEN modes ---
+// Actual active cols/rows/cell size depend on the current mode -- see
+// screen_editor.h's screenEditorCols()/Rows()/CellW()/CellH(). These two
+// just size the underlying storage for the largest mode (SCREEN 3).
+static constexpr int SCREEN_EDITOR_MAX_COLS = 80;
+static constexpr int SCREEN_EDITOR_MAX_ROWS = 24;
+
+// Buffer size for whole-program text (LOAD/SAVE .bas serialization, and
+// the run-time source built for My-Basic) -- same ceiling convention as
+// TEXT_BUFFER_SIZE above, not a function of free RAM.
+// Three separate static buffers this size exist (save/load in
+// screen_editor.cpp, the RUN source in mb_bridge.cpp) -- keep this modest,
+// each doubling is 3x the DRAM cost. 100 lines * 160 chars (see
+// program_store.h) is ~16000 chars worst case; 8192 covers a realistic
+// program with headroom without being the thing that overflows RAM again.
+static constexpr size_t PROGRAM_TEXT_BUFFER_SIZE = 8192;
 
 // --- Font Size ---
 enum class FontSize : uint8_t { SMALL = 0, MEDIUM = 1, LARGE = 2 };

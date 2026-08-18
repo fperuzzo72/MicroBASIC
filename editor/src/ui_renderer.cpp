@@ -37,7 +37,10 @@ uint32_t getScanAgeMs();
 #include <builtinFonts/notosans_12_bold.h>
 #include <builtinFonts/ubuntu_10_regular.h>
 #include <builtinFonts/ubuntu_10_bold.h>
+#include <builtinFonts/unscii_24x48.h>
 #include <builtinFonts/unscii_16x32.h>
+#include <builtinFonts/unscii_12x24.h>
+#include <builtinFonts/unscii_10x20.h>
 
 // Font objects (file-scoped)
 static EpdFont ns16Regular(&notosans_16_regular);
@@ -56,11 +59,17 @@ static EpdFont u10Regular(&ubuntu_10_regular);
 static EpdFont u10Bold(&ubuntu_10_bold);
 static EpdFontFamily u10Family(&u10Regular, &u10Bold);
 
-// MicroBASIC SCREEN 1 default -- monospace, no bold variant (see
+// MicroBASIC SCREEN 0/1/2/3 monospace fonts -- no bold variant (see
 // research/fonts/tools/emit_epdfont_header.py in the MicroBASIC repo for
-// how this header was generated from Unscii).
-static EpdFont unsciiMonoRegular(&unscii_16x32);
-static EpdFontFamily unsciiMonoFamily(&unsciiMonoRegular);
+// how these headers were generated from Unscii).
+static EpdFont unsciiMono0Regular(&unscii_24x48);
+static EpdFontFamily unsciiMono0Family(&unsciiMono0Regular);
+static EpdFont unsciiMono1Regular(&unscii_16x32);
+static EpdFontFamily unsciiMono1Family(&unsciiMono1Regular);
+static EpdFont unsciiMono2Regular(&unscii_12x24);
+static EpdFontFamily unsciiMono2Family(&unsciiMono2Regular);
+static EpdFont unsciiMono3Regular(&unscii_10x20);
+static EpdFontFamily unsciiMono3Family(&unsciiMono3Regular);
 
 // OTA app detection (defined in main.cpp)
 extern OtaAppEntry otaApps[];
@@ -100,7 +109,10 @@ void rendererSetup(GfxRenderer& renderer) {
   renderer.insertFont(FONT_BODY, ns14Family);
   renderer.insertFont(FONT_UI, ns12Family);
   renderer.insertFont(FONT_SMALL, u10Family);
-  renderer.insertFont(FONT_SCREEN_MONO, unsciiMonoFamily);
+  renderer.insertFont(FONT_SCREEN_MONO_0, unsciiMono0Family);
+  renderer.insertFont(FONT_SCREEN_MONO_1, unsciiMono1Family);
+  renderer.insertFont(FONT_SCREEN_MONO_2, unsciiMono2Family);
+  renderer.insertFont(FONT_SCREEN_MONO_3, unsciiMono3Family);
   editorSetGlyphWidthFn(&editorGlyphWidthPx);
 }
 
@@ -209,10 +221,12 @@ void drawMainMenu(GfxRenderer& renderer, HalGPIO& gpio) {
   renderer.drawCenteredText(FONT_BODY, 30, "MicroSlate", tc, EpdFontFamily::BOLD);
 
   // Menu items (base + dynamically detected OTA apps)
-  // "Screen Editor" (SCREEN 1 grid) and "New Program" (the original prose
-  // editor, renamed) are two distinct tools over the same file repository
-  // -- see MicroBASIC repo's docs/DEVELOPMENT_LOG.md.
-  static const char* baseMenuItems[] = {"Browse Files", "Screen Editor", "New Program", "Settings", "Sync"};
+  // "MicroBASIC" (the SCREEN 0-3 terminal) leads the list -- it's the
+  // project's actual identity going forward, not just another tool. "New
+  // Program" (the original prose editor, still just "New Note" under a
+  // new name) is a second, distinct way to write a program's source over
+  // the same file repository -- see MicroBASIC repo's docs/DEVELOPMENT_LOG.md.
+  static const char* baseMenuItems[] = {"MicroBASIC", "Browse Files", "New Program", "Settings", "Sync"};
   static constexpr int BASE_MENU_COUNT = 5;
   int menuCount = BASE_MENU_COUNT + otaAppCount;
 
@@ -1153,18 +1167,24 @@ void drawScreenEditor(GfxRenderer& renderer, HalGPIO& gpio) {
 
   const int cursorRow = screenEditorGetCursorRow();
   const int cursorCol = screenEditorGetCursorCol();
+  const int cols = screenEditorCols();
+  const int rows = screenEditorRows();
+  const int cellW = screenEditorCellW();
+  const int cellH = screenEditorCellH();
+  const int marginX = screenEditorMarginX();
+  const int fontId = screenEditorFontId();
 
-  for (int row = 0; row < SCREEN_EDITOR_ROWS; row++) {
-    const int y = row * SCREEN_EDITOR_CELL_H;
-    for (int col = 0; col < SCREEN_EDITOR_COLS; col++) {
-      const int x = SCREEN_EDITOR_MARGIN_X + col * SCREEN_EDITOR_CELL_W;
+  for (int row = 0; row < rows; row++) {
+    const int y = row * cellH;
+    for (int col = 0; col < cols; col++) {
+      const int x = marginX + col * cellW;
       const bool isCursor = (row == cursorRow && col == cursorCol);
       if (isCursor) {
-        renderer.fillRect(x, y, SCREEN_EDITOR_CELL_W, SCREEN_EDITOR_CELL_H, true);
+        renderer.fillRect(x, y, cellW, cellH, true);
       }
       char utf8[5];
       utf8Encode(screenEditorGetCell(row, col), utf8);
-      renderer.drawText(FONT_SCREEN_MONO, x, y, utf8, !isCursor);
+      renderer.drawText(fontId, x, y, utf8, !isCursor);
     }
   }
 

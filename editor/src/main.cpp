@@ -19,6 +19,7 @@
 #include "ui_renderer.h"
 #include "wifi_sync.h"
 #include "screen_editor.h"
+#include "mb_bridge.h"
 
 // Enum for sleep reasons
 enum class SleepReason {
@@ -61,7 +62,10 @@ void applyOrientationToRenderer(Orientation o) {
 static Preferences uiPrefs;
 
 // --- Shared UI state ---
-UIState currentState = UIState::MAIN_MENU;
+// Boots straight into MicroBASIC (SCREEN 1) -- the physical Back button
+// (and the typed MENU command) is the deliberate, always-available way
+// back to MAIN_MENU. See docs/DEVELOPMENT_LOG.md.
+UIState currentState = UIState::SCREEN_EDITOR;
 int mainMenuSelection = 0;
 int selectedFileIndex = 0;
 int settingsSelection = 0;
@@ -169,10 +173,16 @@ static void updateScreen() {
   screenDirty = false;
 
   // Apply orientation. SCREEN_EDITOR forces/restores its own orientation
-  // override directly (see input_handler.cpp) without touching
-  // currentOrientation, so this never fires while that mode is active.
+  // override directly (entry point in input_handler.cpp, boot path in
+  // setup()) without touching currentOrientation -- this has to actively
+  // skip re-applying currentOrientation while that mode is active, not
+  // just rely on currentOrientation staying unchanged: since boot now
+  // starts in SCREEN_EDITOR (see main.cpp's currentState initializer),
+  // lastOrientation's PORTRAIT default can differ from a real saved
+  // non-Portrait currentOrientation on the very first call here, which
+  // would otherwise stomp the boot-time LANDSCAPE_CCW override immediately.
   static Orientation lastOrientation = Orientation::PORTRAIT;
-  if (currentOrientation != lastOrientation) {
+  if (currentOrientation != lastOrientation && currentState != UIState::SCREEN_EDITOR) {
     applyOrientationToRenderer(currentOrientation);
     lastOrientation = currentOrientation;
   }
@@ -245,6 +255,13 @@ void setup() {
       DBG_PRINTLN("UI prefs restored from SD backup");
     }
   }
+
+  // Boots straight into SCREEN_EDITOR (currentState's initial value) --
+  // force its landscape-CCW override now, same as entering it from the
+  // menu would, without touching the just-loaded currentOrientation.
+  screenEditorReset();
+  applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
+  mbBridgeSetup();
 
   bleSetup();
 
