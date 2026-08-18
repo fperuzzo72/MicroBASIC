@@ -960,3 +960,81 @@ whatever noise event causes this, or subtly affecting the analog
 frontend during frequency transitions. Worth testing directly: does the
 phantom-press rate drop if `mbBridgeSetup()`/My-Basic's heap footprint
 is temporarily removed on an otherwise-identical build?
+
+## Interim fix that actually unblocked typing: disable physical RIGHT in SCREEN_EDITOR
+
+The phantom-button investigation above was written up as "needs a fresh
+session" — then the user came back mid-session unable to type a program
+at all, cursor jumping mid-line on every attempt. That's not a
+"revisit later" severity, so shipped a narrow, honest workaround instead
+of a real fix: physical RIGHT no longer does anything inside
+SCREEN_EDITOR specifically (`main.cpp`'s `processPhysicalButtons()`,
+scoped to that one `case` only — confirmed by grep that it's the only
+`UIState::SCREEN_EDITOR` arm in that switch, so MAIN_MENU/SETTINGS/
+FILE_BROWSER/etc. still navigate normally with the physical D-pad).
+A BLE keyboard's own Right arrow is unaffected — it arrives via HID
+report parsing, not this analog GPIO read, so cursor movement while
+typing still works fine from the keyboard. **Confirmed by the user: this
+completely fixed typing.** Root cause (the ADC noise itself) is still
+open; this just removes the one button whose threshold band happens to
+sit in the noise-exposed danger zone from the typing path entirely.
+
+## RELEASE_BUILD toggled off and back on twice more, chasing two different things
+
+Went back into a debug build (temporarily un-defining `-DRELEASE_BUILD`
+again) twice more this session:
+
+1. To test whether the sheer volume of `DBG_PRINTF` traffic itself
+   (every keystroke, every BLE report, every display-refresh step) was
+   part of what made the phantom-button rate worse -- plausible since
+   heavy `Serial`/USB-CDC writes can add real latency if nothing's
+   draining the far end fast enough. Reflashed a clean `-DRELEASE_BUILD`
+   production build and had the user retest. Typing corruption was
+   already fixed by the RIGHT-button change above by this point, so this
+   didn't get a clean isolated answer either way -- worth remembering
+   this variable exists if the phantom-button rate is revisited.
+2. To instrument `screenEditorFlushDisplay()` (in `main.cpp`) with
+   millis()-based timing around the wait/draw/wait sequence, chasing a
+   different report: a `PRINT`-in-a-loop program felt like it only
+   updated the screen "every 3 seconds or more" -- too slow for
+   anything resembling a game -- and Ctrl+C/Escape felt like they
+   weren't working.
+
+That second one turned out not to be a bug so much as an expectations
+mismatch, confirmed by a real photo of the panel mid-run: the screen
+showed `Teste` printed edge-to-edge, wrapped across multiple rows,
+dozens of repetitions deep, all in one frame -- because **My-Basic runs
+the interpreted loop far faster than the e-ink panel can possibly
+redraw** (~640ms per `FAST_REFRESH`, throttled further to at most once
+per 500ms of wall-clock time by this session's own flush hook). Ctrl+C
+*was* taking effect essentially immediately at the interpreter level;
+what looked like "not working" was the display simply still catching up
+to output the program had already generated before the break landed --
+`?Break` was sitting in the grid the whole time, just behind everything
+printed in the gap. Confirmed directly with the user, who was satisfied
+this explains it and asked to leave it as-is for now rather than chase
+either a faster refresh path or an interpreter-side rate limit tonight.
+
+Two smaller things surfaced by that same photo, neither chased further
+tonight, both worth a look next time:
+- A spurious `?Invalid expression Ln 0` printed immediately before the
+  `?Break` line -- looks like returning `MB_FUNC_ERR` from the stepped
+  handler markets a mid-statement parse into a bad state before My-Basic
+  reaches the code path that would normally print a clean `?Break`
+  alone. Cosmetic (both messages communicate "stopped"), but worth
+  understanding.
+- Visible fading/ghosting creeping in from the top of the screen down
+  after enough consecutive `FAST_REFRESH` calls in a row with no
+  intervening `FULL_REFRESH` -- a well-known, expected e-ink phenomenon
+  when a panel never gets the periodic full clear/repaint cycle it needs
+  to reset accumulated pixel drift. `drawScreenEditor()`
+  (`ui_renderer.cpp`) unconditionally uses `FAST_REFRESH` today, no
+  refresh-count-based full-refresh fallback exists yet. Explicitly asked
+  by the user to leave this alone for tonight rather than fix it live.
+
+Ended the session back on a clean `-DRELEASE_BUILD` production build,
+slot-flashed to `0x650000` as always. The `[PHYSBTN]` and `[FLUSH]`
+`DBG_PRINTF` diagnostics added while chasing these are left in the
+source (both compile to nothing under `RELEASE_BUILD`, zero runtime
+cost in the shipped build) -- flip the flag back off to pick either
+investigation back up without re-deriving where to even look.

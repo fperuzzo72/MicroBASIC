@@ -227,10 +227,16 @@ static void waitForRefresh() {
 }
 
 void screenEditorFlushDisplay() {
+  unsigned long t0 = millis();
   waitForRefresh();
+  unsigned long t1 = millis();
   drawScreenEditor(renderer, gpio);
+  unsigned long t2 = millis();
   waitForRefresh();
+  unsigned long t3 = millis();
   screenDirty = false;
+  DBG_PRINTF("[FLUSH] waitPrev=%lums draw=%lums waitNew=%lums total=%lums\n",
+             t1 - t0, t2 - t1, t3 - t2, t3 - t0);
 }
 
 void setup() {
@@ -538,11 +544,18 @@ static void processPhysicalButtons() {
         enqueueKeyEvent(k, 0, false);
       };
 
+      // Physical RIGHT disabled here: it's the button on the noisy end of
+      // the shared-ADC ladder (see the [PHYSBTN] investigation above) and
+      // firing on its own was making it impossible to type a program --
+      // silently moving the cursor mid-line with no visible cause. A BLE
+      // keyboard's own Right arrow still works fine (it goes through BLE
+      // HID parsing, not this analog read, so it isn't affected). Interim
+      // mitigation, not a fix for the underlying noise -- see
+      // docs/DEVELOPMENT_LOG.md.
       uint8_t heldKey = 0;
       if      (btnUp)    heldKey = HID_KEY_UP;
       else if (btnDown)  heldKey = HID_KEY_DOWN;
       else if (btnLeft)  heldKey = HID_KEY_LEFT;
-      else if (btnRight) heldKey = HID_KEY_RIGHT;
 
       if (heldKey != repeatKey) {
         if (heldKey != 0) {
