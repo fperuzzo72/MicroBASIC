@@ -209,10 +209,12 @@ void drawMainMenu(GfxRenderer& renderer, HalGPIO& gpio) {
   renderer.drawCenteredText(FONT_BODY, 30, "MicroSlate", tc, EpdFontFamily::BOLD);
 
   // Menu items (base + dynamically detected OTA apps)
-  // "Screen Editor" replaces "New Note" here for this MicroBASIC test pass
+  // "Screen Editor" (SCREEN 1 grid) and "New Program" (the original prose
+  // editor, renamed) are two distinct tools over the same file repository
   // -- see MicroBASIC repo's docs/DEVELOPMENT_LOG.md.
-  static const char* baseMenuItems[] = {"Browse Files", "Screen Editor", "Settings", "Sync"};
-  int menuCount = 4 + otaAppCount;
+  static const char* baseMenuItems[] = {"Browse Files", "Screen Editor", "New Program", "Settings", "Sync"};
+  static constexpr int BASE_MENU_COUNT = 5;
+  int menuCount = BASE_MENU_COUNT + otaAppCount;
 
   // lineH covers FONT_UI's full glyph extent (ascender+descender, ~35px)
   // with margin, so the selection bar never clips the bottom of descenders
@@ -229,7 +231,7 @@ void drawMainMenu(GfxRenderer& renderer, HalGPIO& gpio) {
 
   for (int i = startIdx; i < menuCount && (i - startIdx) < maxVisible; i++) {
     int yPos = listTop + ((i - startIdx) * lineH);
-    const char* label = (i < 4) ? baseMenuItems[i] : otaApps[i - 4].name;
+    const char* label = (i < BASE_MENU_COUNT) ? baseMenuItems[i] : otaApps[i - BASE_MENU_COUNT].name;
     if (i == mainMenuSelection) {
       clippedFillRect(renderer, 5, yPos - 4, sw - 10, lineH - 2, tc);
       drawClippedText(renderer, FONT_UI, 20, yPos, label, sw - 40, !tc);

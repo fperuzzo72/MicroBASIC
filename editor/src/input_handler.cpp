@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include <SDCardManager.h>
 #include <Utf8.h>
+#include <cctype>
 
 // External variables
 extern bool autoReconnectEnabled;
@@ -306,6 +307,72 @@ static void handleEditorKey(uint8_t keyCode, uint8_t modifiers) {
 // Handle MicroBASIC SCREEN 1 grid editor input — first test pass, no
 // interpreter, no selection/clipboard, just cursor movement and typing
 // straight into the fixed 48x15 grid.
+// Strips a pair of surrounding double quotes, if present ("MYPROG" -> MYPROG).
+static void stripQuotes(const char* in, char* out, int outSize) {
+  int len = strlen(in);
+  if (len >= 2 && in[0] == '"' && in[len - 1] == '"') {
+    len -= 2;
+    if (len >= outSize) len = outSize - 1;
+    memcpy(out, in + 1, len);
+    out[len] = '\0';
+  } else {
+    strncpy(out, in, outSize - 1);
+    out[outSize - 1] = '\0';
+  }
+}
+
+// Recognizes LOAD/SAVE/MENU when they're the entire content of the
+// cursor's row (case-insensitive, LOAD/SAVE take a filename argument
+// after a space, optionally quoted) and executes them instead of a plain
+// newline -- direct-mode commands, in the classic BASIC sense, so they
+// don't become part of the saved program text (the row is cleared before
+// running them). Returns false ("not a command, insert a normal newline
+// instead") for anything that doesn't match.
+static bool tryScreenEditorCommand() {
+  char line[SCREEN_EDITOR_COLS + 1];
+  screenEditorGetCurrentLineText(line, sizeof(line));
+
+  char upper[SCREEN_EDITOR_COLS + 1];
+  int n = 0;
+  for (; line[n]; n++) upper[n] = (char)toupper((unsigned char)line[n]);
+  upper[n] = '\0';
+
+  if (strcmp(upper, "MENU") == 0) {
+    screenEditorClearRow(screenEditorGetCursorRow());
+    applyOrientationToRenderer(currentOrientation);
+    currentState = UIState::MAIN_MENU;
+    screenDirty = true;
+    return true;
+  }
+
+  auto parseArg = [&](const char* keyword) -> const char* {
+    size_t klen = strlen(keyword);
+    if (strncmp(upper, keyword, klen) != 0) return nullptr;
+    if (line[klen] != ' ' && line[klen] != '\0') return nullptr;
+    const char* arg = line + klen;
+    while (*arg == ' ') arg++;
+    return (*arg != '\0') ? arg : nullptr;
+  };
+
+  static char argBuf[MAX_FILENAME_LEN];
+
+  if (const char* arg = parseArg("SAVE")) {
+    stripQuotes(arg, argBuf, sizeof(argBuf));
+    screenEditorClearRow(screenEditorGetCursorRow());
+    screenEditorSave(argBuf);
+    screenDirty = true;
+    return true;
+  }
+  if (const char* arg = parseArg("LOAD")) {
+    stripQuotes(arg, argBuf, sizeof(argBuf));
+    screenEditorLoad(argBuf);  // resets the whole grid itself
+    screenDirty = true;
+    return true;
+  }
+
+  return false;
+}
+
 static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {
   if (keyCode == HID_KEY_ESCAPE) {
     deadKeyReset();  // discard any pending dead key
@@ -321,7 +388,12 @@ static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {
     case HID_KEY_UP:        screenEditorMoveCursor(-1, 0); screenDirty = true; return;
     case HID_KEY_DOWN:      screenEditorMoveCursor(1, 0);  screenDirty = true; return;
     case HID_KEY_BACKSPACE: screenEditorBackspace();       screenDirty = true; return;
-    case HID_KEY_ENTER:     screenEditorNewline();         screenDirty = true; return;
+    case HID_KEY_ENTER:
+      if (!tryScreenEditorCommand()) {
+        screenEditorNewline();
+        screenDirty = true;
+      }
+      return;
   }
 
   // Printable character — same US-International dead key engine as the
@@ -434,7 +506,11 @@ static void dispatchEvent(const KeyEvent& event) {
 
   switch (currentState) {
     case UIState::MAIN_MENU: {
-      int menuCount = 4 + otaAppCount;
+      // Base items: Browse Files, Screen Editor, New Program, Settings,
+      // Sync -- keep in sync with ui_renderer.cpp's baseMenuItems[] /
+      // BASE_MENU_COUNT.
+      constexpr int BASE_MENU_COUNT = 5;
+      int menuCount = BASE_MENU_COUNT + otaAppCount;
       if (event.keyCode == HID_KEY_DOWN) {
         mainMenuSelection = (mainMenuSelection + 1) % menuCount;
         screenDirty = true;
@@ -447,22 +523,27 @@ static void dispatchEvent(const KeyEvent& event) {
           currentState = UIState::FILE_BROWSER;
           screenDirty = true;
         } else if (mainMenuSelection == 1) {
-          // MicroBASIC test pass: this used to be "New Note" -> createNewFile()
-          // + title prompt. Replaced with entering the SCREEN 1 grid editor —
-          // see MicroBASIC repo's docs/DEVELOPMENT_LOG.md.
+          // SCREEN 1 grid editor -- see MicroBASIC repo's
+          // docs/DEVELOPMENT_LOG.md.
           screenEditorReset();
           applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
           currentState = UIState::SCREEN_EDITOR;
           screenDirty = true;
         } else if (mainMenuSelection == 2) {
+          // "New Program" -- the original prose editor ("New Note"),
+          // renamed: a second, free-form way to write a program's source,
+          // alongside the grid-faithful Screen Editor.
+          createNewFile();
+          openTitleEdit("Untitled", UIState::TEXT_EDITOR);
+        } else if (mainMenuSelection == 3) {
           currentState = UIState::SETTINGS;
           screenDirty = true;
-        } else if (mainMenuSelection == 3) {
+        } else if (mainMenuSelection == 4) {
           wifiSyncStart();
           currentState = UIState::WIFI_SYNC;
           screenDirty = true;
-        } else if (mainMenuSelection >= 4) {
-          switchToOtaApp(mainMenuSelection - 4);
+        } else if (mainMenuSelection >= BASE_MENU_COUNT) {
+          switchToOtaApp(mainMenuSelection - BASE_MENU_COUNT);
         }
       }
       break;

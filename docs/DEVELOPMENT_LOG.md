@@ -411,3 +411,45 @@ rather than a uniform one.
 Fix: `ascender` set to `0` in the generator, header regenerated, both
 flashed as a slot-only write to `0x650000` (same reasoning as before —
 leaves the reader and NVS-stored BLE pairing untouched) for the retest.
+Confirmed fixed on hardware: cursor and typed characters both land on the
+same row now, including the inverted-cursor-cell rendering.
+
+## Two editors, one program repository; LOAD/SAVE/MENU
+
+Decision, after the first successful on-device test: don't make Screen
+Editor *replace* the prose editor, run both as distinct tools over the
+same file repository. Home now has five base items: Browse Files, Screen
+Editor, **New Program** (the original "New Note" / prose `TEXT_EDITOR`,
+just relabeled — still exactly the createNewFile() + title-prompt flow
+it always was), Settings, Sync. The idea: the grid-faithful Screen Editor
+for SCREEN-mode-accurate work, but the full prose editor (word-wrap,
+typewriter/pagination modes, etc.) is sometimes just a nicer *tool* for
+banging out a program's source, especially before there's a real BASIC
+editing experience (line renumbering, syntax help) to make the grid
+editor's raw character-grid feel worthwhile on its own.
+
+`ui_renderer.cpp`'s `baseMenuItems[]`/`BASE_MENU_COUNT` and
+`input_handler.cpp`'s `dispatchEvent()` `MAIN_MENU` case both hardcode
+this list/order — no menu-entry table, so adding an item means touching
+both, same constraint noted the first time SCREEN_EDITOR was added.
+
+Also added direct-mode commands inside the Screen Editor itself — typed
+as the *entire* content of a row, then Enter, instead of a normal newline
+(case-insensitive; the row is cleared first, so command text never ends
+up saved as if it were program content):
+
+- `MENU` — same effect as pressing Back (restores the real orientation,
+  returns to Home). Anticipating Screen Editor eventually becoming the
+  system's actual boot screen (no Home menu at boot at that point) rather
+  than something entered/exited through one, per the original spec — at
+  that point a physical Back button alone won't be the only way out.
+- `SAVE name` / `LOAD name` (quotes around the name optional) — whole
+  15-row grid as plain UTF-8 text, one line per row with trailing spaces
+  trimmed, under `/MicroBASIC/programs/<name>.txt` (sanitized: `/`→`_`,
+  `.txt` appended if missing). `LOAD` resets the grid first; a missing
+  file leaves it untouched rather than erroring destructively.
+
+No on-screen success/failure feedback yet for LOAD/SAVE (only
+`DBG_PRINTF` to serial) — the grid uses the full 480px panel height with
+no spare row for a status line. Worth a real solution once this is used
+for real; a one-line transient overlay is the likely shape of it.

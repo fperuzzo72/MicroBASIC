@@ -29,3 +29,23 @@ void screenEditorBackspace();
 
 // Moves the cursor to column 0 of the next row (stops at the last row).
 void screenEditorNewline();
+
+// Clears one row back to spaces (used before executing a LOAD/SAVE/MENU
+// command line, so the command text itself doesn't end up saved as if it
+// were program content).
+void screenEditorClearRow(int row);
+
+// Copies the cursor's row into `out` as plain ASCII (non-ASCII codepoints
+// become '?'), trimmed of trailing spaces, always null-terminated. Used
+// for recognizing LOAD/SAVE/MENU command lines -- those keywords and
+// filenames are ASCII-only, so this is only for command *recognition*,
+// not general text export.
+void screenEditorGetCurrentLineText(char* out, int outSize);
+
+// Saves/loads the whole grid as plain UTF-8 text (one line per row,
+// trailing spaces trimmed) under /MicroBASIC/programs/<name>.txt --
+// `name` is sanitized (no '/', truncated) and gets a .txt extension if it
+// doesn't already have one. Load resets the grid and cursor first;
+// missing file / IO error returns false and leaves the grid untouched.
+bool screenEditorSave(const char* name);
+bool screenEditorLoad(const char* name);
