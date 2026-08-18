@@ -1169,3 +1169,82 @@ that integration landed, not after any button-code change. Testing on
 the user's second physical device (planned, not yet done) is still the
 cleanest way to separate "this exact unit" from "this exact firmware
 under more load" as the real variable.
+
+## Upstream MicroWriter fixes not yet ported here (2026-08-18)
+
+MicroBASIC's `editor/` forked from MicroWriter's `editor/` at some point
+(exact base commit not tracked — see "Exact relationship to the
+MicroWriter repo (fork vs. dependency) isn't decided yet" near the top of
+this file). Since then, a MicroWriter session (`~/github/MicroWriter`)
+made three rounds of fixes that this repo hasn't picked up. Confirmed by
+direct grep against this repo's current `editor/src/` — none of these are
+here yet. Not blind copy-paste candidates: this repo's `main.cpp`,
+`ui_renderer.cpp` etc. have diverged substantially (BASIC integration,
+the phantom-button investigation above), so each needs porting by hand
+against MicroWriter's current source, not applied as a patch.
+
+**1. "MicroSlate" → "MicroWriter" branding.** MicroWriter's product name
+changed from MicroSlate to MicroWriter; MicroBASIC still has the old
+name in the same spots MicroWriter did before its own fix:
+- `ui_renderer.cpp:221` — `drawCenteredText(FONT_BODY, 30, "MicroSlate", ...)`,
+  the Home-screen header text (MicroWriter changed this to `"MicroWriter"`
+  — obviously don't just copy that string here verbatim, since this repo's
+  Home screen presumably wants "MicroBASIC" or similar, not either of
+  those; just flagging the stale string, not prescribing the replacement).
+- `ble_keyboard.cpp:585` — `NimBLEDevice::init("MicroSlate")`, the
+  BLE-advertised device name shown when pairing a keyboard.
+- `main.cpp:712-713` — sleep-screen title string.
+- `main.cpp:244,323` — `"MicroSlate starting..."`/`"MicroSlate ready."`
+  debug logs.
+(The attribution comment at `main.cpp:315-316`, explaining the codebase
+is credited as MicroSlate in `NOTICE.md` while the product name differs,
+is fine to keep as-is — MicroWriter kept the equivalent comment too.)
+
+**2. `/microslate` → `/microwriter` SD folder migration.** MicroWriter's
+`sd_backup.h` gained an `ensureSettingsDir()` helper: checks for the new
+folder name first, falls back to renaming a pre-existing old-name folder
+in place (preserving whatever was backed up there) instead of starting
+fresh, only creates new if neither exists. This repo's `sd_backup.h`
+doesn't have it — still has three separate hand-rolled
+`if (!SdMan.exists("/microslate")) SdMan.mkdir("/microslate")` call
+sites (`main.cpp:840`, `ble_keyboard.cpp:552`, `wifi_sync.cpp:145`) plus
+the hardcoded `/microslate/...` paths at `main.cpp:272,841`,
+`ble_keyboard.cpp:532`, `wifi_sync.cpp:126`. Whatever folder name
+MicroBASIC settles on (may not even want "microwriter" — worth deciding
+deliberately rather than copying MicroWriter's choice by default), the
+*migration pattern* (rename-in-place fallback, not a blind rename) is
+the part worth porting, so an existing install's saved settings don't
+get silently orphaned by a folder rename.
+
+**3. OTA dual-boot switch rollback bug — this one's a real, confirmed bug,
+not just drift.** `main.cpp`'s `switchToOtaApp()` here uses the exact same
+`ota_boot::switchTo(target)` call MicroWriter's did before today. Root
+cause (fully diagnosed this session, see MicroWriter's own
+`docs/DEVELOPMENT_LOG.md` section "The *real* sleep/wake culprit: ESP-IDF
+app rollback, not otadata resets" for the full writeup): `switchTo()`
+always writes the newly-selected OTA slot with rollback state `NEW`
+(correct for a reader's own genuine firmware self-update, wrong for a
+plain dual-boot switch to an already-working sibling slot). On hardware
+where the physically-flashed bootloader has ESP-IDF's app-rollback
+feature enabled, switching into MicroBASIC and then letting the device
+sleep before anything confirms the slot valid gets it silently rolled
+back to the sibling (reader) slot on the next wake — indistinguishable
+from "sleep/wake always dumps you back into the reader even though
+MicroBASIC was active." Confirmed hands-on: this is exactly the bug a
+physical test device running MicroBASIC in this slot was hitting.
+
+Fix (verified working, all four MicroWriter reader targets rebuilt and
+one device retested after applying it): added a `confirmLastOtaSwitch()`
+helper right next to `switchToOtaApp()` that re-reads the otadata entry
+`switchTo()` just wrote (the one with the higher `ota_seq`) and flips
+just its `ota_state` field from `NEW` to `VALID` (`2`) — a second
+erase+rewrite of that one 4KB sector, since flash bits can only be
+cleared without an erase and `NEW`(`0`)→`VALID`(`2`) needs to *set* a
+bit. Deliberately does *not* touch `ota_boot::switchTo()` itself (that's
+upstream reader code, reused as-is, and its `NEW`-state behavior is
+correct for the reader's own genuine self-update path, which calls the
+same function). See MicroWriter's `editor/src/main.cpp` (search
+`confirmLastOtaSwitch`) for the exact, copy-portable implementation —
+it's self-contained (just `esp_partition.h` + the `ota_boot::SelectEntry`
+struct already visible via `OtaBootSwitch.h`), no other MicroWriter-only
+dependencies, so this one *can* be ported close to verbatim.
