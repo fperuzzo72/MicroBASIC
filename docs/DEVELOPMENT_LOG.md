@@ -306,3 +306,79 @@ decision point in the module docstring.
 
 Neither `SCREEN` mode-switching nor the graphics mode is implemented
 yet — both are still just this spec.
+
+## First test firmware: SCREEN 1 grid editor
+
+Built to validate the SCREEN 1 spec on real hardware before writing any
+interpreter code. On a branch of MicroWriter (`microbasic-screen-editor-test`,
+commit `97fb59c`), not this repo yet at the time:
+
+- Generated `unscii_16x32.h`, an `EpdFontData` C header for Unscii at the
+  SCREEN 1 size, hand-emitted rather than run through MicroWriter's own
+  `fontconvert.py` — that script only loads fonts via FreeType
+  (`face.load_glyph(...)`), and this project's Unscii resizer produces raw
+  pixel arrays, not a font file FreeType can open. `EpdGlyph`/
+  `EpdFontData`'s exact field semantics (`left`/`top`/`advanceX`) were
+  read directly out of `GfxRenderer.cpp`'s `renderChar()` pixel-placement
+  math (`screenX = x + glyph.left + glyphX`, `screenY = y - glyph.top +
+  glyphY`) rather than assumed — every glyph in this font is the *entire*
+  16×32 cell with `left=0, top=0`, so `y` in `drawText()` calls is simply
+  the pixel row of the cell's top edge, no baseline-offset math needed by
+  callers. 191 glyphs (ASCII + the full Latin-1 Supplement block, which
+  Unscii covers with zero gaps — checked before committing to a single
+  contiguous interval for it). Generator:
+  `research/fonts/tools/emit_epdfont_header.py`.
+- Added `screen_editor.{h,cpp}`: the 48×15 grid + cursor, no
+  scrolling/paging in this first pass (stops advancing at the last cell
+  rather than wrapping the grid).
+- `main.cpp`'s three copies of the `Orientation` → `GfxRenderer::Orientation`
+  switch got collapsed into one `applyOrientationToRenderer()` helper —
+  needed because SCREEN_EDITOR forces landscape-CCW on entry and restores
+  the user's real setting on exit, *without* going through the persisted
+  `currentOrientation` global (that variable auto-saves to NVS/SD on every
+  change — routing the temporary override through it would have
+  persisted "landscape-CCW" as the user's actual preference).
+- Repurposed Home's "New Note" (`mainMenuSelection == 1`) to enter
+  SCREEN_EDITOR instead of the prose editor's title-prompt flow. No
+  BLE-keyboard-configured gate was added — none existed anywhere in
+  MicroWriter to hook into (text editor entry was already unconditional),
+  and physical Back already exits any screen regardless of state, so
+  "just press Back if you haven't paired a keyboard yet" already worked
+  for free.
+- Typing reuses MicroWriter's existing US-International dead-key engine
+  (`dead_keys.h`) — same one the prose editor uses — so accented input
+  works in the grid editor too, decoding the dead-key engine's UTF-8
+  output back to a single codepoint per cell via `utf8NextCodepoint()`.
+- Builds clean (`pio run -e xteink_x4`): 1,686,640 bytes flash (was
+  1,669,904 before this change — the font adds ~17KB), no new compiler
+  warnings.
+- Flashed to the physical X4 as a **slot-only** write to `0x650000` (the
+  editor's dedicated OTA partition), *not* the merged bootloader+
+  partitions+app image — the device already had a real CrossPoint-lineage
+  dual-boot (reader + MicroWriter) installed, and a full `0x0` flash would
+  have wiped both the reader and the NVS-stored BLE keyboard pairing.
+  Slot-only leaves the reader and NVS untouched.
+- Confirmed while investigating this: the dual-boot partition assignment
+  is **fixed**, not symmetric — the reader always builds into `app0`
+  (`0x10000`) and the editor always into `app1` (`0x650000`) (see
+  `README.md`'s merge_bin example and every `build-*.yml` workflow). That
+  matters for future partition planning: `app1` only ever has to fit the
+  editor (1.6-ish MB used of its 6.25MB), never a full reader, so it has
+  far more slack than `app0` (already 5.9-6.1MB used by CPR-vCodex/
+  CrossInk) — shrinking `app1` to make room for a 3rd OTA partition is
+  much safer than touching `app0`.
+
+## Repo consolidation: MicroBASIC becomes the real repo
+
+Decision: move the firmware into *this* repo for good, as `editor/` —
+copied straight from the MicroWriter branch above (`git archive` of the
+tracked files only, no `.pio` build cache), **not a fork or submodule,
+and not kept in sync with MicroWriter upstream**. Rationale: MicroWriter's
+own future changes aren't expected to be relevant to MicroBASIC's
+direction from here; anything that does turn out useful gets ported over
+deliberately later instead of tracked automatically. `editor/LICENSE`
+(MIT, from MicroSlate via MicroWriter) is preserved unchanged, as its
+license requires — see `NOTICE.md` for the exact source commit and full
+attribution chain. Verified the copy builds identically
+(`cd editor && pio run -e xteink_x4` — same 1,686,640-byte output) before
+committing it here.

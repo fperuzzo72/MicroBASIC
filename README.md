@@ -6,21 +6,35 @@ and an MSX-style `SCREEN` command to switch between four text densities
 and a full graphics mode (`PSET`/`LINE`/`CIRCLE`) — instead of a
 note-taking app.
 
-Early planning stage. No firmware code yet. This repo currently holds the
-research and decisions that'll drive the first implementation — see
+Early implementation stage — `editor/` builds and flashes today (see
+"Status" below). This repo holds the firmware itself plus the research
+and decisions that got it here — see
 [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) for the full narrative
 (useful for picking this project back up on a machine that doesn't have
 the conversation history that produced it).
+
+## Status
+
+`editor/` — a **plain copy** of [MicroWriter](https://github.com/fperuzzo72/MicroWriter)'s
+editor firmware (not a fork/submodule, not kept in sync with upstream —
+see `NOTICE.md` for exactly which commit it was copied from). First
+change on top of that base: Home's "New Note" now opens a `SCREEN 1`
+grid editor (48×15, Unscii, no BASIC interpreter wired in yet — just the
+character surface) instead of the prose note editor. Builds clean with
+PlatformIO (`cd editor && pio run -e xteink_x4`) and has been flashed and
+tested on the actual X4 hardware.
 
 ## Plan so far
 
 - **Base**: [MicroWriter](https://github.com/fperuzzo72/MicroWriter)'s
   editor firmware — BLE keyboard host, e-ink rendering/refresh pipeline
   (`GfxRenderer`/`EInkDisplay`, including a non-blocking `FAST_REFRESH` and
-  an experimental windowed/partial refresh), SD card, webserver/OTA — with
-  the text editor swapped for a BASIC line editor + interpreter. Exact
-  relationship to the MicroWriter repo (fork vs. dependency) not decided
-  yet.
+  an experimental windowed/partial refresh), SD card, webserver/OTA —
+  copied into `editor/` here (see "Status" above), with the text editor
+  being swapped out for a BASIC line editor + interpreter over time. No
+  ongoing sync with MicroWriter upstream — its own future changes aren't
+  expected to be relevant to MicroBASIC's direction; anything that turns
+  out useful later gets ported over deliberately instead.
 - **Interpreter**: [My-Basic](https://github.com/paladin-t/my_basic) (MIT,
   two files, designed to be embedded/extended) as the core, with
   `SCREEN`/`PSET`/`LINE`/`CIRCLE` bound by hand to the existing
@@ -130,9 +144,17 @@ d-pad + power button, BLE 5.0, SD card. Same target as MicroWriter.
   experimental, unused elsewhere in MicroWriter) as the partial-refresh
   strategy for it.
 - Implement `SCREEN 0/1/2/3` mode-switching with the centering behavior
-  spec'd above.
-- Decide the MicroWriter relationship (fork vs. dependency) and start the
-  actual firmware tree.
+  spec'd above (the current `SCREEN 1` test is a fixed grid, no mode
+  switch yet).
+- Wire in the My-Basic interpreter core.
+- Eventually: a real 3-way OTA/dual-boot setup (reader + MicroWriter +
+  MicroBASIC on one SD card/flash) — needs `OtaBootSwitch.cpp` generalized
+  from its current hardcoded 2-partition scheme, and a 3rd app partition.
+  MicroWriter's own editor partition (`app1`, `0x650000`) has a lot of
+  slack (~1.6MB used of 6.25MB, since it never has to fit a full reader),
+  so shrinking just that one — not the reader's `app0`, which is nearly
+  full with CrossInk — is the likely path once this is worth doing for
+  real.
 
 ## License
 

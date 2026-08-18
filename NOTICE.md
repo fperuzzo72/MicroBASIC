@@ -1,5 +1,21 @@
 # Third-party notices
 
+## `editor/` — firmware base
+
+Copied from [MicroWriter](https://github.com/fperuzzo72/MicroWriter)
+(commit `97fb59c23bd09f895874885f9055eff19be21cc0`, branch
+`microbasic-screen-editor-test`, 2026-08-17) — a **plain file copy**, not
+a git fork/submodule and not kept in sync with upstream; MicroWriter's own
+future changes aren't expected to be relevant to MicroBASIC's direction,
+and anything that turns out useful later gets ported over deliberately
+instead. `editor/LICENSE` (MIT, Joshua Hinton — MicroWriter's own editor
+is itself imported from [MicroSlate](https://github.com/Josh-writes/microslate-firmware))
+is preserved unchanged, as required by its license; MicroBASIC's own code
+added on top (from `main.cpp`, `input_handler.cpp`, `ui_renderer.cpp`,
+`screen_editor.{h,cpp}`, `config.h` onward) is this project's own MIT
+license (see root `LICENSE`). Full detail on what's changed and why is in
+`docs/DEVELOPMENT_LOG.md`.
+
 `research/fonts/` carries the font source files behind the final
 `SCREEN 0/1/2/3` font decision (see README.md and
 `docs/DEVELOPMENT_LOG.md`) — **Unscii**, default, and **Terminus Bold**,

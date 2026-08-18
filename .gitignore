@@ -6,3 +6,18 @@ build/
 **/__pycache__/
 *.local*
 *.log
+
+# editor/ (copied from MicroWriter, see NOTICE.md) build/generated artifacts
+editor/lib/EpdFont/fontsrc
+editor/lib/EpdFont/scripts/downloaded_fonts/
+editor/lib/EpdFont/scripts/instanced_fonts/
+editor/lib/EpdFont/scripts/output/
+editor/lib/I18n/I18nKeys.h
+editor/lib/I18n/I18nStrings.h
+editor/lib/I18n/I18nStrings.cpp
+editor/**/*.generated.h
+editor/src/version.generated.inc
+/compile_commands.json
+/.cache
+.history/
+/.venv
