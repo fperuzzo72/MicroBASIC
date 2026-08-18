@@ -1038,3 +1038,29 @@ slot-flashed to `0x650000` as always. The `[PHYSBTN]` and `[FLUSH]`
 source (both compile to nothing under `RELEASE_BUILD`, zero runtime
 cost in the shipped build) -- flip the flag back off to pick either
 investigation back up without re-deriving where to even look.
+
+### Next session, phantom-RIGHT: two concrete directions from the user
+
+1. **Isolate device vs. design.** Re-enable physical RIGHT in
+   SCREEN_EDITOR (revert the `main.cpp` change above) and test on a
+   *different* physical X4 unit. Everything gathered tonight was on one
+   specific device -- worth ruling out that this is that unit's own
+   button/contact/ADC-channel wearing out or being marginal, rather than
+   a property of the shared-ADC ladder design in general. If a second
+   unit doesn't reproduce it at anywhere near the same rate, the fix
+   changes completely (repair/replace that button vs. a firmware-level
+   noise-rejection fix).
+2. **Check against upstream MicroSlate for a regression.** The user's
+   recollection is that this phantom-press behavior goes back to
+   original MicroSlate, specifically around when this project's US-
+   International dead-key work was first added -- i.e. it may date to
+   *our own* early changes to the physical-key-reading path, not to
+   MicroSlate itself. Worth a direct diff: compare this repo's
+   `editor/lib/InputManager/` and the physical-button-reading parts of
+   `editor/src/main.cpp` (`processPhysicalButtons()`) against
+   [Josh-writes/microslate-firmware](https://github.com/Josh-writes/microslate-firmware)
+   (the original upstream MicroSlate MicroWriter's own editor is
+   imported from -- see `NOTICE.md`) to see whether the ADC-ladder
+   reading logic was ever touched while wiring up dead-key/US-
+   International support, and if so, whether that change is what
+   introduced or worsened the noise sensitivity.
