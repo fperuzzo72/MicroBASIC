@@ -1,34 +1,74 @@
 #include "program_store.h"
 
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
 
-struct ProgramLine {
-  int number;
-  char text[MAX_PROGRAM_LINE_LEN];
-};
+// See program_store.h for the record layout. Header is two uint16s, accessed
+// through memcpy rather than a packed struct so this stays alignment-safe.
+static constexpr size_t REC_HEADER = 4;
 
-static ProgramLine lines[MAX_PROGRAM_LINES];
+static uint8_t buffer[PROGRAM_BUFFER_SIZE];
+static size_t used = 0;
 static int lineCount = 0;
 
-void programStoreClear() { lineCount = 0; }
-int programStoreCount() { return lineCount; }
+// Sequential-access memo: LIST walks indices 0,1,2,... so remembering where
+// the last lookup landed turns the whole listing from O(n^2) into O(n).
+static int cursorIndex = 0;
+static size_t cursorOffset = 0;
 
-static int findExactIndex(int num) {
-  for (int i = 0; i < lineCount; i++) {
-    if (lines[i].number == num) return i;
-    if (lines[i].number > num) break;
-  }
-  return -1;
+static inline uint16_t recLen(size_t off) {
+  uint16_t v;
+  memcpy(&v, buffer + off, sizeof(v));
+  return v;
 }
 
-static int findInsertPos(int num) {
-  int i = 0;
-  while (i < lineCount && lines[i].number < num) i++;
-  return i;
+static inline uint16_t recNum(size_t off) {
+  uint16_t v;
+  memcpy(&v, buffer + off + 2, sizeof(v));
+  return v;
+}
+
+static inline const char* recText(size_t off) {
+  return reinterpret_cast<const char*>(buffer + off + REC_HEADER);
+}
+
+static inline void resetCursor() {
+  cursorIndex = 0;
+  cursorOffset = 0;
+}
+
+void programStoreClear() {
+  used = 0;
+  lineCount = 0;
+  resetCursor();
+}
+
+int programStoreCount() { return lineCount; }
+size_t programStoreBytesUsed() { return used; }
+size_t programStoreBytesFree() { return PROGRAM_BUFFER_SIZE - used; }
+
+// Offset of the record with exactly this line number, or `used` if absent.
+static size_t findExact(int num) {
+  size_t off = 0;
+  while (off < used) {
+    uint16_t n = recNum(off);
+    if (n == num) return off;
+    if (n > num) break;
+    off += recLen(off);
+  }
+  return used;
+}
+
+// Offset where a record with this line number belongs (first record with a
+// higher number, or the end).
+static size_t findInsertPos(int num) {
+  size_t off = 0;
+  while (off < used && recNum(off) < num) off += recLen(off);
+  return off;
 }
 
 static bool isBlank(const char* s) {
@@ -38,37 +78,67 @@ static bool isBlank(const char* s) {
   return true;
 }
 
-void programStoreSet(int num, const char* text) {
-  int idx = findExactIndex(num);
+static void removeAt(size_t off) {
+  const uint16_t len = recLen(off);
+  memmove(buffer + off, buffer + off + len, used - off - len);
+  used -= len;
+  lineCount--;
+  resetCursor();
+}
+
+bool programStoreSet(int num, const char* text) {
+  const size_t existing = findExact(num);
 
   if (isBlank(text)) {
-    if (idx >= 0) {
-      for (int i = idx; i < lineCount - 1; i++) lines[i] = lines[i + 1];
-      lineCount--;
-    }
-    return;
+    if (existing < used) removeAt(existing);
+    return true;
   }
 
-  if (idx >= 0) {
-    strncpy(lines[idx].text, text, MAX_PROGRAM_LINE_LEN - 1);
-    lines[idx].text[MAX_PROGRAM_LINE_LEN - 1] = '\0';
-    return;
-  }
+  size_t textLen = strlen(text);
+  if (textLen > (size_t)(MAX_PROGRAM_LINE_LEN - 1)) textLen = MAX_PROGRAM_LINE_LEN - 1;
+  const size_t needed = REC_HEADER + textLen + 1;
 
-  if (lineCount >= MAX_PROGRAM_LINES) return;  // full -- silently ignored for now
+  // Replacing: drop the old record first so the fit check below sees the
+  // space it frees. Nothing else can fail after this point.
+  if (existing < used) removeAt(existing);
+  if (used + needed > PROGRAM_BUFFER_SIZE) return false;
 
-  int pos = findInsertPos(num);
-  for (int i = lineCount; i > pos; i--) lines[i] = lines[i - 1];
-  lines[pos].number = num;
-  strncpy(lines[pos].text, text, MAX_PROGRAM_LINE_LEN - 1);
-  lines[pos].text[MAX_PROGRAM_LINE_LEN - 1] = '\0';
+  const size_t pos = findInsertPos(num);
+  memmove(buffer + pos + needed, buffer + pos, used - pos);
+
+  const uint16_t lenField = (uint16_t)needed;
+  const uint16_t numField = (uint16_t)num;
+  memcpy(buffer + pos, &lenField, sizeof(lenField));
+  memcpy(buffer + pos + 2, &numField, sizeof(numField));
+  memcpy(buffer + pos + REC_HEADER, text, textLen);
+  buffer[pos + REC_HEADER + textLen] = '\0';
+
+  used += needed;
   lineCount++;
+  resetCursor();
+  return true;
 }
 
 bool programStoreGetByIndex(int index, int* outNum, const char** outText) {
   if (index < 0 || index >= lineCount) return false;
-  *outNum = lines[index].number;
-  *outText = lines[index].text;
+
+  // Resume from the memo when moving forward from it, else start over.
+  int i = 0;
+  size_t off = 0;
+  if (index >= cursorIndex && cursorOffset < used) {
+    i = cursorIndex;
+    off = cursorOffset;
+  }
+  while (i < index && off < used) {
+    off += recLen(off);
+    i++;
+  }
+  if (off >= used) return false;
+
+  cursorIndex = index;
+  cursorOffset = off;
+  *outNum = recNum(off);
+  *outText = recText(off);
   return true;
 }
 
@@ -133,12 +203,12 @@ bool programStoreBuildRunSource(char* out, int outSize) {
   int pos = 0;
   char rewritten[MAX_PROGRAM_LINE_LEN * 2];
 
-  for (int i = 0; i < lineCount; i++) {
-    int n = snprintf(out + pos, outSize - pos, "L%d:\n", lines[i].number);
+  for (size_t off = 0; off < used; off += recLen(off)) {
+    int n = snprintf(out + pos, outSize - pos, "L%d:\n", (int)recNum(off));
     if (n < 0 || pos + n >= outSize) return false;
     pos += n;
 
-    rewriteGotoGosub(lines[i].text, rewritten, sizeof(rewritten));
+    rewriteGotoGosub(recText(off), rewritten, sizeof(rewritten));
     int n2 = snprintf(out + pos, outSize - pos, "%s\n", rewritten);
     if (n2 < 0 || pos + n2 >= outSize) return false;
     pos += n2;
@@ -149,8 +219,8 @@ bool programStoreBuildRunSource(char* out, int outSize) {
 
 bool programStoreSerialize(char* out, int outSize) {
   int pos = 0;
-  for (int i = 0; i < lineCount; i++) {
-    int n = snprintf(out + pos, outSize - pos, "%d %s\n", lines[i].number, lines[i].text);
+  for (size_t off = 0; off < used; off += recLen(off)) {
+    int n = snprintf(out + pos, outSize - pos, "%d %s\n", (int)recNum(off), recText(off));
     if (n < 0 || pos + n >= outSize) return false;
     pos += n;
   }
@@ -172,7 +242,7 @@ void programStoreLoadSerialized(const char* text) {
 
     char* endptr = nullptr;
     long num = strtol(buf, &endptr, 10);
-    if (endptr != buf && num > 0) {
+    if (endptr != buf && num > 0 && num <= 65535) {
       const char* textStart = endptr;
       while (*textStart == ' ') textStart++;
       programStoreSet((int)num, textStart);

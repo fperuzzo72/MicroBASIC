@@ -1435,3 +1435,129 @@ partition's ceiling), slot-flashed to `app0`.
 **Confirmed by the user: the Home-menu shortcut now reads "MicroBASIC"
 correctly.** Both fixes (OTA-switch confirmation + the reader's own
 dual-boot patch set) are now verified working together on this device.
+
+## Interpreter review: My-Basic is the wrong foundation, and the decision to swap
+
+Stepped back to review the interpreter choice before building more on top of
+it. Findings, from reading My-Basic's own source rather than its docs:
+
+- `LEFT`/`MID`/`RIGHT`/`STR`/`CHR` are registered **without** the `$`
+  (`my_basic_src.inc`'s `_std_libs` table), so classic `LEFT$(A$,3)` fails.
+  One genuine bright spot: `A$` *as a variable* works — `$` is
+  `_STRING_POSTFIX_CHAR`, a valid identifier char that also types the
+  variable as a string.
+- Missing entirely: `DATA`/`READ`/`RESTORE`, `ON x GOTO`, `TAB()`/`SPC()`,
+  `PRINT`'s `,`/`;` zone semantics, `STOP`/`CONT`, `IF x THEN <line>`.
+- Errors report the row of the *rewritten* source, not the line the user
+  typed — already visible on hardware as `?Invalid expression Ln 0`.
+- AST with many small allocations, which is what starved the BLE stack.
+
+Each is individually patchable by more text rewriting on top of the
+`L%d:`-label hack already in `program_store.cpp`, but they compose badly and
+the error-line problem is structural, not cosmetic. My-Basic is a structured
+scripting language wearing BASIC syntax; this project wants a line-numbered
+BASIC.
+
+Measured the cost of switching now: **~220 lines** depend on My-Basic
+(`mb_bridge.cpp` 153 + `rewriteGotoGosub` 70). The screen editor, terminal
+model, program store, LIST/FILES/SAVE/LOAD and the SCREEN modes are all ours
+and interpreter-agnostic. This is the cheapest this decision will ever be.
+
+**Decision: adopt [slviajero/tinybasic](https://github.com/slviajero/tinybasic)**
+(Stefan Lenz's IoT BASIC). Native line numbers, tokenised program in one
+fixed memory block, `A$`/`LEFT$`/arrays/`DATA`-`READ`/`ON..GOTO`/`DEF FN`,
+MS-BASIC compatibility modes (MSX BASIC *is* Microsoft BASIC), already runs
+on ESP32, and a clean interpreter/runtime split we can hook to our screen
+editor. Its REPL rule is literally the one we hand-built:
+
+```c
+if (token == NUMBER) { storeline(); }  /* number -> program memory */
+else                 { statement();  }  /* anything else -> direct mode */
+```
+
+It also ships `HASGRAPH` (line/circle/rect/fill/colour), which lines up with
+the planned ports to Paper S3, LilyGO T5S3 and a colour CYD.
+
+**Licence:** ambiguous upstream — the root `LICENSE` (2025) is BSD-3-Clause
+but every source header still carries a GPL v3 notice. Deliberately *not*
+resolved, because it doesn't need to be: GPL obligations trigger on
+distribution, and this is a personal hobby build. To keep it that way the
+source is **not vendored**. It gets fetched and adapted at build time by the
+same `patches/` mechanism already used for the readers, so this repo stays
+free of third-party licence entanglement and can remain public. A full-history
+mirror lives at `../_backups/stefan-tinybasic.bundle` (see its README) as
+insurance against upstream disappearing.
+
+## Two interpreter-independent fixes done first
+
+Both of these were worth doing regardless of which interpreter wins, so they
+landed before the swap starts.
+
+### 1. Wrapped logical lines (a real regression against MSX)
+
+`screenEditorMoveCursor()` and friends each did
+`logicalLineStartRow = cursorRow`, so navigating onto the *second* row of a
+line that had wrapped past the right margin made Enter read only that tail.
+That breaks the single most important trick in the MSX editor: `LIST`, cursor
+up onto a listed line, edit it in place, Enter to re-store it — which fails
+exactly when the line is long, i.e. when you most want it.
+
+Replaced the tracked `logicalLineStartRow` variable with a per-row
+`rowIsContinuation[]` flag, set by the two places that can actually wrap
+(typing past the last column, terminal output doing the same) and cleared
+wherever a genuinely new line starts. The logical line's start *and end* are
+now derived by walking that chain in both directions from wherever the cursor
+is. This is simultaneously simpler (navigation functions no longer maintain
+any logical-line state at all — every `logicalLineStartRow = cursorRow`
+special case is gone) and more correct: like MSX, Enter now reads the whole
+logical line no matter where within it you pressed Enter.
+
+### 2. Program store: fixed array → packed buffer
+
+Was `ProgramLine lines[60]`, i.e. 60 × (4 + 160) = 9840 bytes of
+*always-resident* static RAM regardless of program size, plus two arbitrary
+ceilings (60 lines, 160 chars). Now one contiguous buffer of variable-length
+records:
+
+```
+[uint16 recLen][uint16 lineNumber][text bytes...][NUL]
+```
+
+kept sorted by line number, so insert/delete is a `memmove` and walking is
+`off += recLen`. 8192 bytes holds roughly 270-400 typical lines — five-plus
+times the old ceiling in *less* RAM (measured: 51.6% → 51.1%, −1576 bytes).
+Sized conservatively rather than for maximum capacity, deliberately: the BLE
+stack needs a 20KB contiguous allocation at connect time and we have already
+been on the wrong side of that once.
+
+Two behaviour fixes came with it: storing a line now reports `?Out of memory`
+instead of failing silently when full, and line numbers outside 1..65535 are
+rejected with `?Line number out of range` rather than being truncated into
+the uint16 field.
+
+Also note `PROGRAM_TEXT_BUFFER_SIZE` (4096) is now the *binding* limit, below
+the program buffer itself — a program can be stored that then fails to SAVE
+or RUN because its serialised/label-rewritten form doesn't fit. Left as-is on
+purpose: that whole intermediate whole-program-text step disappears with the
+interpreter swap, since a line-numbered interpreter runs the stored program
+directly.
+
+### Host tests
+
+Added `test/` with `run_tests.sh` and a test for the packed buffer, compiling
+the real `program_store.cpp` unmodified (it only uses standard headers).
+Covers ordering, in-place grow/shrink, blank-deletes, uint16 boundary line
+numbers, sequential vs. random `GetByIndex` (the sequential-access memo has
+its own failure mode), mid-program deletes, serialise round-trip, the
+GOTO/GOSUB label rewriting including the string-literal exclusion, buffer-full
+refusal, and over-long-line truncation.
+
+Runs in about a second. This is a direct response to how this project has
+actually been spending its time: hardware debugging loops have been by far
+the most expensive thing here (the phantom-RIGHT hunt cost hours and dozens
+of build/flash/log cycles for one bug), so anything testable on the host
+should be caught on the host first. The `memmove`-based insert/delete in
+particular is exactly the kind of code that fails subtly and would have been
+miserable to diagnose through a serial log — and the suite did immediately
+flag one real behaviour (the rewriter upper-cases `gosub`), which turned out
+to be harmless but was worth knowing rather than discovering on device.

@@ -123,14 +123,22 @@ static constexpr int SCREEN_EDITOR_MAX_ROWS = 24;
 // screen_editor.cpp, the RUN source in mb_bridge.cpp) -- keep this modest,
 // each doubling is 3x the DRAM cost.
 //
-// Trimmed from 8192 (and MAX_PROGRAM_LINES from 100 to 60, see
-// program_store.h) after discovering these static buffers were shrinking
-// the runtime heap enough to starve BLE: xTaskCreate() for the 20480-byte
-// BLE connect task was failing (returned -1, largest free block ~8-8.7KB)
-// on every single connect/reconnect attempt, silently -- no bleConnectTask
-// log ever printed, the keyboard was never actually dialed. See
-// docs/DEVELOPMENT_LOG.md. 60 lines * 160 chars is ~9600 chars worst case;
-// 4096 covers a realistic program with headroom.
+// Trimmed from 8192 (alongside the program store's own sizing, then still a
+// fixed MAX_PROGRAM_LINES array -- see program_store.h, since replaced by a
+// packed buffer) after discovering these static buffers were shrinking the
+// runtime heap enough to starve BLE: xTaskCreate() for the 20480-byte BLE
+// connect task was failing (returned -1, largest free block ~8-8.7KB) on
+// every single connect/reconnect attempt, silently -- no bleConnectTask log
+// ever printed, the keyboard was never actually dialed. See
+// docs/DEVELOPMENT_LOG.md.
+//
+// NOTE: this is now the binding limit on program size, *below*
+// PROGRAM_BUFFER_SIZE -- a program can be stored that then fails to SAVE or
+// RUN because its serialised/label-rewritten form doesn't fit in 4096. That
+// asymmetry goes away with the interpreter swap being planned (a
+// line-numbered interpreter runs the stored program directly, with no
+// intermediate whole-program text form), so it's deliberately not being
+// papered over here.
 static constexpr size_t PROGRAM_TEXT_BUFFER_SIZE = 4096;
 
 // --- Font Size ---

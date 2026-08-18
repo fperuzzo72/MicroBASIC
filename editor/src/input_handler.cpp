@@ -467,7 +467,18 @@ static void executeLogicalLine(const char* line) {
     long num = strtol(p, &endptr, 10);
     const char* text = endptr;
     while (*text == ' ') text++;
-    programStoreSet((int)num, text);
+    if (num < 1 || num > 65535) {
+      // Line numbers are stored as uint16 (see program_store.h's record
+      // layout); 0 is reserved as "no line" the way classic BASICs do.
+      screenEditorStartNewInputLine();
+      screenEditorTermPrintLine("?Line number out of range");
+      return;
+    }
+    if (!programStoreSet((int)num, text)) {
+      screenEditorStartNewInputLine();
+      screenEditorTermPrintLine("?Out of memory");
+      return;
+    }
     screenEditorStartNewInputLine();
     return;
   }
