@@ -1064,3 +1064,61 @@ investigation back up without re-deriving where to even look.
    reading logic was ever touched while wiring up dead-key/US-
    International support, and if so, whether that change is what
    introduced or worsened the noise sensitivity.
+
+### Direction 2, done: found the exact matching historical bug — already fixed here
+
+Checked direction 2 above against a local checkout of the user's own
+prior project, `fperuzzo72/microslate-firmware-US-International`
+(`/Users/fperuzzo/github/microslate-firmware-US-International` on the
+dev machine) — this is almost certainly the actual project the user
+remembered, not upstream Josh-writes/microslate-firmware directly (no
+local clone of that one was needed; the US-International repo's own
+history already had the answer).
+
+Found the exact match: commit `1d186ae` ("Fix InputManager button ADC
+reads for dual-framework build", 2026-07-10, about two weeks after
+`9632066` "Create dead_keys.h") documents -- in detail, in its own
+commit message -- **this precise symptom**: *"visto na prática como um
+'Right' preso (o cursor avança sozinho e sem parar no editor ...) e
+como Back/Confirm/Left nunca registrando enquanto a leitura da escada
+fica presa na faixa do Right"* ("seen in practice as a stuck 'Right'
+(the cursor advances on its own and without stopping in the editor...)
+and as Back/Confirm/Left never registering while the ladder reading
+gets stuck in the Right range"). Root cause identified there: Arduino's
+`analogRead()` triggers a GPIO reconfiguration on *every call* under a
+dual `framework = arduino, espidf` build (exactly this project's
+framework setting) -- frequent enough, called every `loop()` iteration
+for button polling, to destabilize the shared-ADC ladder reading badly
+enough to misclassify, landing disproportionately on RIGHT specifically
+because all buttons share one ADC pin and only one classification can
+win per read.
+
+The fix there: replace `analogRead()`/`pinMode()` with direct ESP-IDF
+calls (`adc1_get_raw()`, `adc1_config_channel_atten()`), matching what
+the *original* MicroSlate `InputManager` did before a later migration
+to a different SDK's own `InputManager` (which had regressed back to
+plain `analogRead()`) reintroduced the bug there.
+
+**Checked whether this project has the same regression: it does not.**
+Grepped the whole `editor/` tree for `analogRead` -- zero real call
+sites, only a comment referencing it. Both `InputManager.cpp` and
+`BatteryMonitor.cpp` (the only two files touching the shared ADC1 unit)
+already use the direct ESP-IDF API throughout
+(`adc1_get_raw`/`adc1_config_channel_atten`), and `InputManager.cpp`'s
+own `begin()` carries the identical comment/reasoning as the historical
+fix almost word for word -- this project's `InputManager` was copied
+from a MicroSlate lineage that already had this particular fix baked
+in, not from the regressed one. Also checked whether `BatteryMonitor`
+(sharing the same ADC1 peripheral, different channel) could be
+interleaving with button reads and destabilizing them some other way --
+`drawScreenEditor()` (`ui_renderer.cpp`) never calls
+`getBatteryPercentage()`, so no battery ADC read happens at all while
+SCREEN_EDITOR is what's on screen, ruling that out too for the case
+that actually matters (typing).
+
+**So: not a repeat of this specific, previously-solved bug.** This
+project inherited the correct fix already. Whatever's still happening
+tonight is either genuine RF/electrical noise (as suspected before) or
+a hardware/contact characteristic of this specific unit -- direction 1
+above (test on a second physical X4) is the more promising next lever,
+not more firmware archaeology on this particular historical thread.
