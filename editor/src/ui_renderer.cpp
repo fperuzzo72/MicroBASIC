@@ -6,6 +6,7 @@
 #include "ble_keyboard.h"
 #include "wifi_sync.h"
 #include "screen_editor.h"
+#include "vc_browser.h"
 #include <Utf8.h>
 
 #include <GfxRenderer.h>
@@ -1187,6 +1188,78 @@ void drawScreenEditor(GfxRenderer& renderer, HalGPIO& gpio) {
       renderer.drawText(fontId, x, y, utf8, !isCursor);
     }
   }
+
+  renderer.beginRefresh(HalDisplay::FAST_REFRESH);
+}
+
+// --- VC: the full-screen program picker (see vc_browser.h) -----------------
+// Everything here is laid out from the active SCREEN mode's own metrics, so
+// it reflows across SCREEN 0-3 with no per-mode special cases. Framing is
+// done with inverse-video bars rather than line-drawing characters, which
+// these fonts don't carry (ASCII + Latin-1 only).
+
+// Draws `text` at (row, col) across exactly `width` cells, padding with
+// spaces so an inverse bar stays solid all the way to its end.
+static void drawCellRun(GfxRenderer& renderer, int fontId, int row, int col, int width,
+                        const char* text, int cellW, int cellH, int marginX, bool inverse) {
+  const int y = row * cellH;
+  const int len = (int)strlen(text);
+  for (int i = 0; i < width; i++) {
+    const int x = marginX + (col + i) * cellW;
+    if (inverse) renderer.fillRect(x, y, cellW, cellH, true);
+    const char c = (i < len) ? text[i] : ' ';
+    if (c != ' ') {
+      const char s[2] = {c, '\0'};
+      renderer.drawText(fontId, x, y, s, !inverse);
+    }
+  }
+}
+
+void drawVcBrowser(GfxRenderer& renderer, HalGPIO& gpio) {
+  (void)gpio;
+  renderer.clearScreen();
+
+  const int cols = screenEditorCols();
+  const int rows = screenEditorRows();
+  const int cellW = screenEditorCellW();
+  const int cellH = screenEditorCellH();
+  const int marginX = screenEditorMarginX();
+  const int fontId = screenEditorFontId();
+
+  const int columns = vcColumns();
+  const int rowsPerCol = vcRowsPerColumn();
+  const int colWidth = vcColumnWidth();
+  const int top = vcScrollTop();
+  const int count = vcFileCount();
+  const int sel = vcSelectedIndex();
+
+  char buf[128];
+
+  drawCellRun(renderer, fontId, 0, 0, cols, " MicroBASIC - Programs", cellW, cellH, marginX, true);
+
+  // Column-major: entries run down a column, then continue in the next one.
+  for (int i = 0; i < columns * rowsPerCol; i++) {
+    const int index = top + i;
+    if (index >= count) break;
+    const int c = i / rowsPerCol;
+    const int r = i % rowsPerCol;
+    const bool isSel = (index == sel);
+
+    snprintf(buf, sizeof(buf), " %.*s", colWidth - 2, vcFileName(index));
+    drawCellRun(renderer, fontId, 1 + r, c * colWidth, colWidth, buf, cellW, cellH, marginX, isSel);
+  }
+
+  if (count == 0) {
+    drawCellRun(renderer, fontId, 2, 0, cols, "  (no programs saved yet)", cellW, cellH, marginX,
+                false);
+  }
+
+  if (count > 0) {
+    snprintf(buf, sizeof(buf), " %lu B  %s", vcFileSize(sel), vcStatusText());
+  } else {
+    snprintf(buf, sizeof(buf), " %s", vcStatusText());
+  }
+  drawCellRun(renderer, fontId, rows - 1, 0, cols, buf, cellW, cellH, marginX, true);
 
   renderer.beginRefresh(HalDisplay::FAST_REFRESH);
 }

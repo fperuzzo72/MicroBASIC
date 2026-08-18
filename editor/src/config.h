@@ -14,7 +14,8 @@ enum class UIState {
   BLUETOOTH_SETTINGS,
   PAIRED_KEYBOARDS,
   WIFI_SYNC,
-  SCREEN_EDITOR
+  SCREEN_EDITOR,
+  VC_BROWSER  // full-screen program picker, opened by the VC command
 };
 
 // --- Display Orientation ---

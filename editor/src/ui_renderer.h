@@ -13,3 +13,4 @@ void drawBluetoothSettings(GfxRenderer& renderer, HalGPIO& gpio);
 void drawPairedKeyboardsMenu(GfxRenderer& renderer, HalGPIO& gpio);
 void drawSyncScreen(GfxRenderer& renderer, HalGPIO& gpio);
 void drawScreenEditor(GfxRenderer& renderer, HalGPIO& gpio);
+void drawVcBrowser(GfxRenderer& renderer, HalGPIO& gpio);

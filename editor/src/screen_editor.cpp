@@ -280,17 +280,51 @@ const char* programFileResultMessage(ProgramFileResult r) {
 // (they're invisible in a listing and make files unopenable by the name
 // shown), and everything else passes through -- including accents, which
 // long filenames support and which a Portuguese-speaking user will type.
+//
+// Names are also folded to lower case, so the SD card ends up with one
+// consistent casing rather than TESTE/Teste/teste as three different files,
+// and SAVE/LOAD become case-insensitive to each other for free. Only ASCII
+// A-Z is folded: tolower() on UTF-8 continuation bytes would corrupt
+// accented characters.
 static void sanitizeFilename(const char* name, char* out, int outSize) {
   while (*name == ' ') name++;
   int n = 0;
   for (const char* p = name; *p && n < outSize - 1; p++) {
-    const char c = *p;
+    char c = *p;
     const bool illegal = (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
                           c == '"' || c == '<' || c == '>' || c == '|');
-    out[n++] = illegal ? '_' : c;
+    if (illegal) c = '_';
+    else if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    out[n++] = c;
   }
   while (n > 0 && out[n - 1] == ' ') n--;  // trailing spaces
   out[n] = '\0';
+}
+
+// Case-insensitive search of the programs directory, for files that arrived
+// from a PC under some other casing (JOGO.BAS) than the lower-case one this
+// firmware writes. Returns true and fills `out` with the real on-disk name.
+static bool findIgnoringCase(const char* wanted, char* out, int outSize) {
+  auto dir = SdMan.open(PROGRAMS_DIR);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return false;
+  }
+  bool found = false;
+  char name[256];
+  dir.rewindDirectory();
+  for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
+    file.getName(name, sizeof(name));
+    if (name[0] != '.' && !file.isDirectory() && strcasecmp(name, wanted) == 0) {
+      strncpy(out, name, outSize - 1);
+      out[outSize - 1] = '\0';
+      found = true;
+    }
+    file.close();
+    if (found) break;
+  }
+  dir.close();
+  return found;
 }
 
 // Builds the path for exactly the name as typed -- no extension is forced on.
@@ -338,16 +372,28 @@ ProgramFileResult screenEditorLoadProgram(const char* name) {
   char path[PROGRAM_PATH_MAX];
   if (!buildProgramPath(name, "", path, sizeof(path))) return ProgramFileResult::BAD_NAME;
 
-  // Exactly what was typed wins; only if that doesn't exist do we try the
-  // .bas form, so a program saved by name still loads by that same name
-  // while `LOAD "X"` also finds an X.bas put there by other means.
+  // Lookup order: the (lower-cased) name as typed, then that name + ".bas",
+  // then a case-insensitive directory scan of both for files that came from
+  // a PC under different casing. So `LOAD "Jogo"` finds jogo, jogo.bas,
+  // JOGO or JOGO.BAS -- whichever is actually there.
   if (!SdMan.exists(path)) {
     char withExt[PROGRAM_PATH_MAX];
-    if (buildProgramPath(name, PROGRAM_EXT, withExt, sizeof(withExt)) && SdMan.exists(withExt)) {
+    const bool haveExt = buildProgramPath(name, PROGRAM_EXT, withExt, sizeof(withExt));
+    if (haveExt && SdMan.exists(withExt)) {
       memcpy(path, withExt, sizeof(path));
     } else {
-      DBG_PRINTF("[MB] Load %s -> NOT FOUND (also tried %s)\n", path, withExt);
-      return ProgramFileResult::NOT_FOUND;
+      char sanitized[MAX_FILENAME_LEN];
+      char actual[MAX_FILENAME_LEN];
+      sanitizeFilename(name, sanitized, sizeof(sanitized));
+      char sanitizedExt[MAX_FILENAME_LEN];
+      snprintf(sanitizedExt, sizeof(sanitizedExt), "%s%s", sanitized, PROGRAM_EXT);
+      if (findIgnoringCase(sanitized, actual, sizeof(actual)) ||
+          findIgnoringCase(sanitizedExt, actual, sizeof(actual))) {
+        snprintf(path, sizeof(path), "%s/%s", PROGRAMS_DIR, actual);
+      } else {
+        DBG_PRINTF("[MB] Load %s -> NOT FOUND\n", path);
+        return ProgramFileResult::NOT_FOUND;
+      }
     }
   }
 

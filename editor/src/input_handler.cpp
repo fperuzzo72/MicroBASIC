@@ -7,6 +7,7 @@
 #include "screen_editor.h"
 #include "program_store.h"
 #include "mb_bridge.h"
+#include "vc_browser.h"
 
 #include <Arduino.h>
 #include <SDCardManager.h>
@@ -534,6 +535,13 @@ static void executeLogicalLine(const char* line) {
     startFilesCommand();
     return;
   }
+  if (isWord("VC")) {
+    // Full-screen program picker (vc_browser.h). Clears its own command text
+    // first so the terminal it returns to isn't left with "VC" on it.
+    screenEditorClearLogicalLine();
+    vcOpen();
+    return;
+  }
   if (const char* arg = wordArg("SAVE")) {
     static char nameBuf[MAX_FILENAME_LEN];
     stripQuotes(arg, nameBuf, sizeof(nameBuf));
@@ -798,6 +806,10 @@ static void dispatchEvent(const KeyEvent& event) {
 
     case UIState::SCREEN_EDITOR:
       handleScreenEditorKey(event.keyCode, event.modifiers);
+      break;
+
+    case UIState::VC_BROWSER:
+      vcHandleKey(event.keyCode, event.modifiers);
       break;
 
     case UIState::RENAME_FILE:

@@ -254,6 +254,7 @@ static void updateScreen() {
     case UIState::PAIRED_KEYBOARDS:   drawPairedKeyboardsMenu(renderer, gpio); break;
     case UIState::WIFI_SYNC:          drawSyncScreen(renderer, gpio); break;
     case UIState::SCREEN_EDITOR:      drawScreenEditor(renderer, gpio); break;
+    case UIState::VC_BROWSER:         drawVcBrowser(renderer, gpio); break;
     default: break;
   }
 }
@@ -637,6 +638,38 @@ static void processPhysicalButtons() {
       }
       break;
     }
+
+    // VC drives entirely from the arrow keys, so it maps the same way as
+    // the menus: physical d-pad to navigation, Confirm to Enter, Back to
+    // Escape. RIGHT is deliberately included here (unlike SCREEN_EDITOR,
+    // where the phantom-press issue made it unusable) -- a stray press here
+    // only moves a selection, it can't corrupt anything typed.
+    case UIState::VC_BROWSER:
+      if (btnUp && !btnUpLast) {
+        enqueueKeyEvent(HID_KEY_UP, 0, true);
+        enqueueKeyEvent(HID_KEY_UP, 0, false);
+      }
+      if (btnDown && !btnDownLast) {
+        enqueueKeyEvent(HID_KEY_DOWN, 0, true);
+        enqueueKeyEvent(HID_KEY_DOWN, 0, false);
+      }
+      if (btnLeft && !btnLeftLast) {
+        enqueueKeyEvent(HID_KEY_LEFT, 0, true);
+        enqueueKeyEvent(HID_KEY_LEFT, 0, false);
+      }
+      if (btnRight && !btnRightLast) {
+        enqueueKeyEvent(HID_KEY_RIGHT, 0, true);
+        enqueueKeyEvent(HID_KEY_RIGHT, 0, false);
+      }
+      if (btnConfirm && !btnConfirmLast) {
+        enqueueKeyEvent(HID_KEY_ENTER, 0, true);
+        enqueueKeyEvent(HID_KEY_ENTER, 0, false);
+      }
+      if (btnBack && !btnBackLast) {
+        enqueueKeyEvent(HID_KEY_ESCAPE, 0, true);
+        enqueueKeyEvent(HID_KEY_ESCAPE, 0, false);
+      }
+      break;
 
     case UIState::RENAME_FILE:
     case UIState::NEW_FILE:
