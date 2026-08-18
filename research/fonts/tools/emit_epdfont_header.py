@@ -6,18 +6,25 @@ own Unscii resizer produces).
 
 Format matches editor/lib/EpdFont/builtinFonts/*.h exactly (verified
 against EpdFontData.h and the pixel-placement math in GfxRenderer.cpp's
-renderChar()/drawText()):
+drawText()/renderChar()). Two steps, not one -- drawText() itself adds
+the font's ascender to y *before* renderChar ever sees it:
 
-    screenX = x + glyph.left + glyphX
-    screenY = y - glyph.top  + glyphY
+    yPos    = y + fontData.ascender          // GfxRenderer::drawText()
+    screenX = x    + glyph.left + glyphX     // GfxRenderer::renderChar()
+    screenY = yPos - glyph.top  + glyphY
 
 Every glyph here is the *entire* fixed-size cell (true monospace, not
 proportionally trimmed like the project's prose fonts), so every glyph
-gets identical left=0, top=0, width=cell_w, height=cell_h, advanceX=cell_w
--- with top=0, `y` in drawText(fontId, x, y, ...) is simply the pixel row
-of the *top* of the character cell, no baseline-offset math needed by
-callers. 1-bit packing (not the 2-bit grayscale mode the prose fonts
-use), MSB-first, ceil(width/8) bytes per row.
+gets identical left=0, top=0, width=cell_w, height=cell_h, advanceX=cell_w.
+For `y` in drawText(fontId, x, y, ...) to land on the pixel row of the
+*top* of the cell (no baseline-offset math needed by callers), the two
+additions above have to cancel: ascender must be 0, matching top=0 --
+NOT cell_h, which is what this script emitted originally and which pushed
+every drawn character down by exactly one full cell height (the cursor,
+drawn with fillRect() directly, doesn't go through drawText() at all, so
+it stayed put -- that mismatch was the tell). 1-bit packing (not the
+2-bit grayscale mode the prose fonts use), MSB-first, ceil(width/8) bytes
+per row.
 
 Usage:
     python3 emit_epdfont_header.py unscii-16.hex 8 16 2 unscii_16x32 \
@@ -139,7 +146,14 @@ def main():
     out.append(f"    {name}Intervals,")
     out.append(f"    {len(intervals)},")
     out.append(f"    {cell_h},  // advanceY")
-    out.append(f"    {cell_h},  // ascender")
+    # GfxRenderer::drawText() computes yPos = y + getFontAscenderSize(fontId)
+    # *before* calling renderChar(), which then does
+    # screenY = yPos - glyph.top + glyphY. Every glyph here has top=0 (see
+    # module docstring), so ascender must be 0 too, or drawText's own y
+    # offset and renderChar's -glyph.top don't cancel out -- they didn't
+    # in the first version of this script (ascender was cell_h), which
+    # pushed every drawn character down by exactly one full cell height.
+    out.append(f"    0,  // ascender (see comment above -- must match glyph.top, which is 0)")
     out.append(f"    0,   // descender")
     out.append(f"    false,  // is2Bit")
     out.append("};")

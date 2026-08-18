@@ -381,4 +381,33 @@ deliberately later instead of tracked automatically. `editor/LICENSE`
 license requires — see `NOTICE.md` for the exact source commit and full
 attribution chain. Verified the copy builds identically
 (`cd editor && pio run -e xteink_x4` — same 1,686,640-byte output) before
-committing it here.
+committing it here. The MicroWriter branch this was copied from has
+since been discarded — this repo is the only copy now.
+
+## Bug: typed characters landed one row below the cursor
+
+First on-device typing test: cursor block rendered in the right cell,
+cursor movement and end-of-line wraparound were both correct, but every
+typed character appeared one full row *below* the cursor instead of in
+it.
+
+Read `GfxRenderer::drawText()` directly rather than re-deriving the pixel
+math from scratch (the module docstring in `emit_epdfont_header.py` had
+only documented `renderChar()`'s half of it):
+
+    yPos    = y + fontData.ascender          // drawText(), BEFORE renderChar
+    screenY = yPos - glyph.top + glyphY       // renderChar()
+
+`emit_epdfont_header.py` had set every glyph's `top=0` (correct — see the
+script's own reasoning for why) but the font's overall `ascender` field
+to `cell_h` (32), not 0. Since `top=0` requires `ascender=0` for those two
+opposing offsets to cancel out, every character was being pushed down by
+a full 32px (one row) relative to where `y` actually pointed. The cursor
+block is drawn with `fillRect()` directly, which never goes through
+`drawText()`/`ascender` at all — staying visually correct is exactly what
+made the mismatch obvious as a *relative* (cursor vs. character) offset
+rather than a uniform one.
+
+Fix: `ascender` set to `0` in the generator, header regenerated, both
+flashed as a slot-only write to `0x650000` (same reasoning as before —
+leaves the reader and NVS-stored BLE pairing untouched) for the retest.

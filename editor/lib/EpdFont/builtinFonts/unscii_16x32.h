@@ -977,7 +977,7 @@ static const EpdFontData unscii_16x32 = {
     unscii_16x32Intervals,
     2,
     32,  // advanceY
-    32,  // ascender
+    0,  // ascender (see comment above -- must match glyph.top, which is 0)
     0,   // descender
     false,  // is2Bit
 };
