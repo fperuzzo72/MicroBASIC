@@ -1122,3 +1122,50 @@ tonight is either genuine RF/electrical noise (as suspected before) or
 a hardware/contact characteristic of this specific unit -- direction 1
 above (test on a second physical X4) is the more promising next lever,
 not more firmware archaeology on this particular historical thread.
+
+### One more round: user suspected the "-usi" fix itself never actually worked
+
+The user pushed back on the framing above -- their memory is that the
+US-International fixes didn't actually resolve this on their end, and
+that a *second physical device* they have, running an *earlier* build,
+works fine specifically because it predates that whole effort (not
+because it's different hardware). Worth checking directly rather than
+taking the commit message's word for it, so went looking for exactly
+which "earlier" version that might be.
+
+Found real version tags in the `microslate-firmware-US-International`
+history: `v1.0.0-usi` and `v1.0.1-usi` (both 2026-06-25, the same day
+`dead_keys.h` was created) and `v2.0.3-usi` (2026-06-28). Cross-checked
+against `git log --all | grep freeink`: the FreeInk SDK migration (and
+therefore the `analogRead()` regression it introduced, and the same-day
+`1d186ae` fix for it) all happened on **2026-07-10** -- two weeks *after*
+every one of those `-usi` tags. So if the "earlier, working" device is
+running any of `v1.0.0-usi`/`v1.0.1-usi`/`v2.0.3-usi`, it was never on
+the FreeInk SDK InputManager at all; it's running whatever InputManager
+came before that migration, straight from the MicroSlate lineage.
+
+Diffed that lineage directly: pulled `lib/InputManager/src/InputManager.cpp`
+and `include/InputManager.h` as they existed at `v2.0.3-usi` (the most
+recent USI tag before the FreeInk SDK switch) and diffed both against
+this project's current copy. **The `.cpp` is byte-for-byte identical.**
+The `.h` differs by exactly one thing: the comment this session added
+above `DEBOUNCE_DELAY` while documenting the investigation -- the actual
+value (`5`) and every other line are identical too. Also diffed the
+`esp_pm_configure`/`setCpuFrequencyMhz` block in `main.cpp` between the
+two -- also identical, including the comment.
+
+**This is about as clean a negative result as this kind of check gets:**
+the button-reading code and the CPU/power-management configuration are
+provably unchanged between the version the user remembers working and
+this project's current state. Whatever's different isn't in either of
+those files. Left standing as the most likely explanation: not a code
+regression at all, but the *system-wide* change in resource pressure
+and activity level from everything this session's BASIC integration
+added (more static RAM eating into the heap headroom BLE and other
+subsystems draw from, more BLE traffic/activity in general with the
+interpreter wired in) -- consistent with the user's own earlier
+observation that the phantom-press rate specifically got worse after
+that integration landed, not after any button-code change. Testing on
+the user's second physical device (planned, not yet done) is still the
+cleanest way to separate "this exact unit" from "this exact firmware
+under more load" as the real variable.
