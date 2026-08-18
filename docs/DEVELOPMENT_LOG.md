@@ -859,3 +859,87 @@ further before the device slept; the dead-key engine
 correct on inspection, so the next session should start by reproducing
 with the same careful no-space-bar-contact method and correlating
 against a live raw HID log before touching any code.
+
+## Solved (mostly): the "phantom space" mystery was a phantom RIGHT-arrow
+
+Picked back up the next day, device still awake. Same symptoms as before
+— text corrupted while typing, e.g. `RUN` landing as `ru n`, `20 GOTO 10`
+landing as `2 0 goto. 10` — but this time with the user typing in tight
+lockstep with a live raw-HID-report watch, which finally cracked it: the
+raw BLE reports were **completely clean** every single time (confirmed
+repeatedly, multiple reproductions: `R`,`U`,`N`,`Enter` — nothing else,
+not even a stray modifier byte). Whatever was corrupting the text was not
+coming from the keyboard at all.
+
+The user's own observation nailed it: *"O cursor se move na tela sem eu
+fazer nada"* ("the cursor moves on screen without me doing anything").
+Not a phantom **character** — a phantom **cursor move**. A silent
+`screenEditorMoveCursor(0, 1)` (right-arrow effect) leaves the skipped
+grid cell at its default `' '` value, which reads back indistinguishably
+from a real typed space once the line is stored — explaining both why it
+looked like a stray space *and* why the raw BLE log was always clean:
+the culprit isn't a BLE report at all.
+
+`screenEditorMoveCursor` only has one call site gated on `HID_KEY_RIGHT`
+— in `main.cpp`'s `processPhysicalButtons()`, which also reads the
+device's own physical D-pad. Added a `DBG_PRINTF` right at that call
+site (`[PHYSBTN] SCREEN_EDITOR nav fired: ...`) and immediately caught it
+live: `key=0x4F (btnUp=0 btnDown=0 btnLeft=0 btnRight=1)` — the physical
+RIGHT button reading as pressed with the user's hands nowhere near the
+device.
+
+Root cause, from reading `InputManager.cpp`/`.h`: this device's D-pad
+isn't wired to individual GPIOs — it's a **shared-ADC resistor ladder**
+(one analog pin carries BACK/CONFIRM/LEFT/RIGHT, distinguished by
+voltage). RIGHT's calibrated real-press readings are ~3-6 (near-zero
+volts) and its threshold band is "anything under 750" — the entire
+low-voltage end of the range, meaning it's the button most exposed to
+any noise pulling the line toward ground. `DEBOUNCE_DELAY` was a mere
+5ms, so a single noisy sample sustained that long is enough to register.
+
+Tried and explicitly **ruled out** this session:
+- **More debounce.** 30ms: no change. 120ms: made it *worse* (near-
+  continuous phantom presses instead of two at connect time) — this
+  actively rules out "just needs more time to settle"; the interference
+  has structure at these timescales that a longer window doesn't filter,
+  it just integrates more of it. Reverted to the original 5ms.
+- **Suppressing physical-button reads for 1.5s after BLE connect.** The
+  first firings were seen right around `[BLE-Task] Keyboard ready!`,
+  which looked like a smoking gun (RF/current-draw noise from the BLE
+  radio during connection setup). The user confirmed the suppression
+  window didn't stop it — it kept happening well into normal typing,
+  long after any connection event. Also confirmed the same phantom
+  jump happens on **MicroSlate itself** (the pre-MicroBASIC base
+  firmware), on plain menu boot, with no BLE keyboard connected at all
+  — though the user also noted MicroSlate has always run its BLE stack
+  regardless, so radio activity in general isn't ruled out as *a*
+  contributing factor, just "the moment a keyboard finishes connecting"
+  specifically. Reverted this too.
+
+**Conclusion: this is a pre-existing hardware/analog characteristic of
+the X4's shared-ADC D-pad, not a bug introduced by MicroBASIC, and not
+fixed by any debounce-timing or BLE-timing lever tried tonight.** In the
+original firmware it was a minor, probably-unnoticed annoyance (an
+occasional wrong menu highlight). In SCREEN_EDITOR it's much more
+damaging, since it silently corrupts whatever line is being typed with
+no visible error. Left the `[PHYSBTN]` diagnostic in place in
+`main.cpp` (harmless, `DBG_PRINTF`-gated) since it's what cracked this —
+next session should start there rather than re-deriving it. Promising
+untried directions for a real fix: tightening RIGHT's ADC threshold
+band to sit much closer to its actual calibrated value instead of the
+entire 0-750 range (currently the most exposed possible threshold
+shape), or requiring several independently-timed consecutive samples
+(not just "stable for N ms" against a single noisy signal) before
+accepting a transition specifically for this button.
+
+This also almost certainly explains the earlier open "CLS doesn't clear
+anything" report from the previous session: if a phantom RIGHT arrow
+landed while typing `CLS`, the stored text would become e.g. `CL S` —
+not a recognized command (checked via exact-string match against
+`"CLS"` in `executeLogicalLine()`, and My-Basic's own case-insensitive
+`CLS` registration wouldn't help since the corruption isn't a case
+issue, it's an inserted space splitting the token in two) — silently
+falling through to `mbBridgeRunDirect("CL S")`, which would fail to
+parse as anything meaningful and do nothing visible. Worth confirming
+directly next session, but no longer worth treating as a separate,
+unexplained bug.

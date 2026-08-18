@@ -353,6 +353,23 @@ static void processPhysicalButtons() {
 
   // Use isPressed() — persistent debounced state.  With one-shot scanning
   // (radio quiet during navigation), InputManager debounce works reliably.
+  //
+  // KNOWN ISSUE, pre-existing (not introduced by MicroBASIC): the shared-ADC
+  // resistor-ladder buttons occasionally register a phantom press with no
+  // physical touch -- confirmed by the user on the *original* MicroWriter/
+  // MicroSlate firmware too (the menu selection jumps to the next item on
+  // its own right after boot, no BLE involved at all). In SCREEN_EDITOR
+  // this is much more damaging than in a menu -- it silently corrupts
+  // whatever BASIC line is being typed instead of just an occasional wrong
+  // menu highlight. Tried and ruled out this session: raising
+  // InputManager's DEBOUNCE_DELAY (30ms didn't help, 120ms made it worse --
+  // see its own comment) and suppressing physical-button reads for a short
+  // window after BLE connect (the user confirmed it keeps happening well
+  // outside that window too, so BLE connection RF isn't the actual
+  // trigger, just possibly a correlated-but-not-causal coincidence, or one
+  // trigger among several). Left the [PHYSBTN] DBG_PRINTF below in place --
+  // it's what confirmed this live in the first place -- for whoever picks
+  // this up next. See docs/DEVELOPMENT_LOG.md.
   bool btnUp      = gpio.isPressed(HalGPIO::BTN_UP);
   bool btnDown    = gpio.isPressed(HalGPIO::BTN_DOWN);
   bool btnLeft    = gpio.isPressed(HalGPIO::BTN_LEFT);
@@ -528,7 +545,11 @@ static void processPhysicalButtons() {
       else if (btnRight) heldKey = HID_KEY_RIGHT;
 
       if (heldKey != repeatKey) {
-        if (heldKey != 0) fireKey(heldKey);
+        if (heldKey != 0) {
+          DBG_PRINTF("[PHYSBTN] SCREEN_EDITOR nav fired: key=0x%02X (btnUp=%d btnDown=%d btnLeft=%d btnRight=%d)\n",
+                     heldKey, btnUp, btnDown, btnLeft, btnRight);
+          fireKey(heldKey);
+        }
         repeatKey = heldKey;
         repeatStart = millis();
         lastRepeat = millis();

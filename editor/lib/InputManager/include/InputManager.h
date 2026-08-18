@@ -101,6 +101,16 @@ class InputManager {
   static const int ADC_RANGES_2[];
 
   static constexpr int ADC_NO_BUTTON = 3800;
+  // Tried raising this from the original 5ms (to 30ms, then 120ms) while
+  // chasing a phantom-RIGHT-press bug that silently corrupts typed BASIC
+  // lines -- confirmed real and reproducible on hardware, but debounce
+  // timing turned out not to be the lever: 30ms didn't fix it, and 120ms
+  // made it *worse* (near-continuous phantom presses instead of two at
+  // connect time), which rules out "just needs more time to settle" and
+  // points at something structural (wiring/contact on this specific unit,
+  // or real sustained interference the debounce timer can't distinguish
+  // from a held button). Reverted to the original value -- see
+  // docs/DEVELOPMENT_LOG.md for the investigation and what's still open.
   static constexpr unsigned long DEBOUNCE_DELAY = 5;
 
   static const char* BUTTON_NAMES[];
