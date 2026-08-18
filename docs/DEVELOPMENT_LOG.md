@@ -1356,3 +1356,82 @@ name — those describe lineage, not user-facing strings, and stay as-is.
 Builds clean. Not yet flashed to either physical device — landed as a
 code change alongside the OTA-switch fix above, both pending the user's
 next hardware test pass.
+
+## Confirmed on hardware: confirmLastOtaSwitch() fixes the phantom-RIGHT bug too
+
+Flashed the build above (OTA-switch fix + rebranding) to the second
+physical device. Result, confirmed by the user directly: **the phantom-
+RIGHT bug is gone** — both the cold CrossPoint→MicroBASIC switch (which
+reliably reproduced it every time before) and sleep/wake now behave
+correctly, no phantom press either way.
+
+This is a genuinely useful, if not fully theorized, result: the leading
+hypothesis remains that leaving the newly-switched-to slot's otadata
+state at `NEW` (pending-verify) rather than `VALID` was interacting with
+something in the boot/peripheral-init path in a way that specifically
+destabilized the shared-ADC button ladder — plausible given the bug only
+ever reproduced on a *cold OTA switch into an unconfirmed slot*, never on
+a clean sleep/wake cycle (both are full resets, but only one of them
+involves an unconfirmed slot). Exactly *what* about an unconfirmed slot
+state touches ADC/GPIO behavior isn't nailed down mechanistically, but
+the fix is real and reproducible, so this is being taken as resolved for
+this device rather than chased further into ESP-IDF bootloader internals
+tonight. Whether this also explains device 1 (this session's original
+test unit, back home) is still open — same fix should be tested there
+next.
+
+## MicroBASIC gets its own dual-boot patch set for CPR-vCodex
+
+Asked to also reinstall an updated CPR-vCodex (the reader) alongside the
+new MicroBASIC build, to see if that resolved a separate, smaller
+annoyance: the reader's own Home-menu shortcut for switching to the
+editor still read "MicroWriter", not "MicroBASIC".
+
+First attempt: cloned `franssjz/cpr-vcodex` fresh (no local checkout
+existed), built its `1.5.0.9-cpr-vcodex` tag plain (`pio run -e
+gh_release`, after `git submodule update --init --recursive` for
+`open-x4-sdk`), slot-flashed to `app0` (`0x10000`) alongside the new
+MicroBASIC build on `app1`. **Didn't fix it** — the shortcut was gone
+entirely, because a stock CPR-vCodex checkout has no dual-boot switching
+feature at all. Searched the checked-out source directly for anything
+resembling `registerOtaAppName`/`ota_names`/`MicroWriter` and found
+nothing, which was the right sign one step too early: the feature isn't
+missing a name, it's not there.
+
+Root cause, from re-reading MicroWriter's own `patches/cpr-vcodex/`
+(the actual source of the dual-boot Home-menu shortcut): the whole
+feature is grafted onto a plain CPR-vCodex checkout at build time by
+eight patch scripts, not present upstream at all — explaining why the
+first build's source search came up empty. More importantly, patch 7
+(`07_patch_i18n_strings.py`) revealed *why* our own `registerOtaAppName`
+dynamic-NVS mechanism was never going to change the displayed text:
+the shortcut's label comes from a **compile-time i18n YAML string**
+(`STR_MICROSLATE: "MicroWriter"`) baked into CPR-vCodex's own
+translation file by the patch, completely independent of what any
+sibling app registers at runtime in `ota_names` NVS. That NVS mechanism
+exists in these patches too (`OtaApps.h`'s `registerOtaAppName`/
+`detectOtaApps`), but it's used the other way around — for the *editor*
+side to dynamically discover and display the *reader's* name, not for
+the reader to discover the editor's. A static label was never going to
+respond to a runtime NVS write no matter how many times MicroBASIC's own
+`setup()` called `registerOtaAppName("MicroBASIC")`.
+
+Fix: copied MicroWriter's whole `patches/cpr-vcodex/` set into this repo
+as `patches/cpr-vcodex/` (own README explaining the relationship), with
+exactly one line changed — patch 7's string value,
+`STR_MICROSLATE: "MicroWriter"` → `STR_MICROSLATE: "MicroBASIC"` (and
+the app-description string reworded to match). Every internal identifier
+(`ShortcutId::MicroSlate`, `microslateShortcut`, the `STR_MICROSLATE` key
+name itself, `switchToFirstOtaApp`, ...) deliberately left exactly as in
+MicroWriter's set — none of those are user-visible, and keeping them
+identical means future patch updates from MicroWriter's own set stay
+easy to diff/port. Re-checked out the `1.5.0.9-cpr-vcodex` tag fresh,
+applied all eight scripts (`for f in patches/cpr-vcodex/*.py; do python3
+"$f"; done` from the `MicroBASIC` repo root, matching each patch's own
+`cpr-vcodex/...` relative paths), built clean (`gh_release` env, 92.8%
+flash — CrossPoint-lineage readers are consistently this close to their
+partition's ceiling), slot-flashed to `app0`.
+
+**Confirmed by the user: the Home-menu shortcut now reads "MicroBASIC"
+correctly.** Both fixes (OTA-switch confirmation + the reader's own
+dual-boot patch set) are now verified working together on this device.
