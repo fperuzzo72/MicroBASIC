@@ -209,6 +209,30 @@ static void updateScreen() {
   }
 }
 
+// See screen_editor.h for why mb_bridge.cpp needs this: a running BASIC
+// program blocks loopTask, so PRINT output would otherwise sit in the
+// grid buffer, invisible, until the program finished or broke out.
+//
+// The wait loops below MUST yield (vTaskDelay, not just pollRefresh() in
+// a tight spin) -- confirmed on hardware: without it, this function alone
+// busy-loops for the ~635-650ms an e-ink refresh takes, back-to-back,
+// starving the FreeRTOS idle task just as badly as mb_run() itself did
+// before the stepped-handler fix (same "Task watchdog ... IDLE (CPU 0)"
+// spam, just moved here instead of gone).
+static void waitForRefresh() {
+  while (renderer.isRefreshing()) {
+    renderer.pollRefresh();
+    vTaskDelay(1);
+  }
+}
+
+void screenEditorFlushDisplay() {
+  waitForRefresh();
+  drawScreenEditor(renderer, gpio);
+  waitForRefresh();
+  screenDirty = false;
+}
+
 void setup() {
   DBG_INIT();
   DBG_PRINTLN("MicroSlate starting...");

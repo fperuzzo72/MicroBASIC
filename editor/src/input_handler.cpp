@@ -947,6 +947,17 @@ static void dispatchEvent(const KeyEvent& event) {
   }
 }
 
+bool inputConsumeBreakPending() {
+  bool sawBreak = false;
+  while (!isQueueEmpty()) {
+    KeyEvent event = dequeueKeyEvent();
+    if (!event.pressed) continue;
+    if (event.keyCode == HID_KEY_ESCAPE) sawBreak = true;
+    if (event.keyCode == HID_KEY_C && isCtrl(event.modifiers)) sawBreak = true;
+  }
+  return sawBreak;
+}
+
 int processAllInput() {
   int processedCount = 0;
   while (!isQueueEmpty()) {

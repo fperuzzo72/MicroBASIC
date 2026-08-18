@@ -121,10 +121,17 @@ static constexpr int SCREEN_EDITOR_MAX_ROWS = 24;
 // TEXT_BUFFER_SIZE above, not a function of free RAM.
 // Three separate static buffers this size exist (save/load in
 // screen_editor.cpp, the RUN source in mb_bridge.cpp) -- keep this modest,
-// each doubling is 3x the DRAM cost. 100 lines * 160 chars (see
-// program_store.h) is ~16000 chars worst case; 8192 covers a realistic
-// program with headroom without being the thing that overflows RAM again.
-static constexpr size_t PROGRAM_TEXT_BUFFER_SIZE = 8192;
+// each doubling is 3x the DRAM cost.
+//
+// Trimmed from 8192 (and MAX_PROGRAM_LINES from 100 to 60, see
+// program_store.h) after discovering these static buffers were shrinking
+// the runtime heap enough to starve BLE: xTaskCreate() for the 20480-byte
+// BLE connect task was failing (returned -1, largest free block ~8-8.7KB)
+// on every single connect/reconnect attempt, silently -- no bleConnectTask
+// log ever printed, the keyboard was never actually dialed. See
+// docs/DEVELOPMENT_LOG.md. 60 lines * 160 chars is ~9600 chars worst case;
+// 4096 covers a realistic program with headroom.
+static constexpr size_t PROGRAM_TEXT_BUFFER_SIZE = 4096;
 
 // --- Font Size ---
 enum class FontSize : uint8_t { SMALL = 0, MEDIUM = 1, LARGE = 2 };

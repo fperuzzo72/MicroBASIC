@@ -4,6 +4,8 @@
 
 #include <NimBLEDevice.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
 
 // HID service and characteristic UUIDs
 static NimBLEUUID hidServiceUUID("1812");
@@ -479,7 +481,11 @@ static void startConnectTask() {
   // 20480 bytes: Logitech has a complex service tree (keyboard + media + battery reports
   // + many descriptors). NimBLE 2.x uses more per-call stack than 1.4.x — 12288 was
   // sufficient before but overflows during full service discovery on the Logitech.
-  xTaskCreate(bleConnectTask, "ble_conn", 20480, NULL, 1, &connectTaskHandle);
+  DBG_PRINTF("[BLE] Free heap=%u largest=%u before xTaskCreate\n",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  BaseType_t xr = xTaskCreate(bleConnectTask, "ble_conn", 20480, NULL, 1, &connectTaskHandle);
+  DBG_PRINTF("[BLE] xTaskCreate returned %d, handle=%p\n", (int)xr, (void*)connectTaskHandle);
 }
 
 // --- NVS multi-keyboard helpers ---

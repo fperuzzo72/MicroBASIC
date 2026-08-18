@@ -9,7 +9,11 @@
 
 // Sized to actually fit in the ESP32-C3's RAM alongside everything else --
 // the first pass at these (200 * 200) overflowed DRAM by ~12KB once linked.
-static constexpr int MAX_PROGRAM_LINES = 100;
+// Trimmed further from 100 to 60 lines (together with config.h's
+// PROGRAM_TEXT_BUFFER_SIZE cut) after this static array's size turned out
+// to be shrinking the runtime heap enough to starve BLE's connect task --
+// see config.h's PROGRAM_TEXT_BUFFER_SIZE comment and docs/DEVELOPMENT_LOG.md.
+static constexpr int MAX_PROGRAM_LINES = 60;
 static constexpr int MAX_PROGRAM_LINE_LEN = 160;
 
 void programStoreClear();

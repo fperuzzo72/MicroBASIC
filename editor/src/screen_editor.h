@@ -86,3 +86,15 @@ void screenEditorTermPrintLine(const char* utf8Text);  // + trailing newline
 // Stored under /MicroBASIC/programs/ on the SD card.
 bool screenEditorSaveProgram(const char* name);
 bool screenEditorLoadProgram(const char* name);  // replaces the program store
+
+// Draws the terminal and blocks until the e-ink refresh finishes. Normal
+// screen updates go through main.cpp's loop() (draw, then poll the
+// refresh non-blockingly on later iterations) -- but a running BASIC
+// program blocks loopTask for its whole duration inside mb_run(), so
+// nothing printed by PRINT would ever actually reach the display until
+// the program finished. mb_bridge.cpp calls this periodically (throttled
+// by time, not by print volume) during RUN so a loop's output is visible
+// as it goes, not just as a final frame when the program stops or is
+// broken out of. Defined in main.cpp, which owns the renderer/gpio
+// instances.
+void screenEditorFlushDisplay();

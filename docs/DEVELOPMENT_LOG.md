@@ -657,3 +657,205 @@ written down this time).
 Flashed as a slot-only write to `0x650000` again, same reasoning as
 every pass before this one (leaves the reader and NVS-stored BLE
 pairing untouched).
+
+## First real-hardware BASIC session: BLE couldn't connect, RUN froze the device, three fixes
+
+The morning after the My-Basic integration landed, first live test on the
+X4: the BLE keyboard would not pair. `Settings > Bluetooth` showed the
+known keyboard, even showed it as "paired"/"active," but nothing typed
+moved the cursor anywhere — not in the prose editor, not in
+SCREEN_EDITOR. Chased this live over a serial connection
+(`pio device monitor` doesn't work in this shell's sandbox — no
+controlling tty for miniterm's `termios.tcgetattr()` — worked around by
+reading the port directly with a small pyserial script instead) across
+several dead ends before finding the real cause.
+
+### False lead #1: wrong OTA partition
+
+First hypothesis, and it did turn out to be *a* real thing (just not
+*the* thing): the device booted back into the **reader** app (CrossPoint/
+CPR-vCodex), not MicroBASIC. Its own log lines (`/.crosspoint/
+sleep_cache/`, `[ACT] Exiting activity: Home`) gave it away — the X4 had
+last been used for reading, and `esptool write_flash` to `0x650000`
+doesn't touch `otadata` (the boot-partition selector), so a reset just
+reboots into whichever app otadata already points at. Fixed by finding
+MicroWriter's own name in the reader's app-switcher menu (registered via
+`registerOtaAppName("MicroWriter")` at boot, from the very first
+dual-boot pass) and switching over. Confirmed via a `[BOOT] otadata:
+active slot=0 ... wrote slot=1 -> app1` log line the moment the switch
+happened. Real, but didn't explain why BLE *still* didn't work once
+MicroBASIC was actually running.
+
+### False lead #2: build had no logging at all
+
+Every `DBG_PRINTF`/`DBG_PRINTLN` in this codebase compiles to nothing
+under `-DRELEASE_BUILD` (in `platformio.ini`'s `build_flags`) — including
+never calling `Serial.begin()`. That's *why* the serial capture showed
+nothing from our own code at first, only the ESP-IDF/NimBLE framework's
+own `ESP_LOGI` lines (a completely separate logging path, unaffected by
+that flag). Temporarily dropped `-DRELEASE_BUILD` for this debugging
+session to get real visibility — every fix below was actually diagnosed
+live against instrumented builds, not guessed at from the release build's
+silence.
+
+### The real cause: `xTaskCreate` for the BLE connect task was failing
+
+With logging back, `connectToDevice()` was clearly being called
+(`[BLE] Will connect to: ...`) but `bleConnectTask()`'s very first line —
+literally its first statement — never printed. That's only possible if
+`xTaskCreate()` itself never ran the task body, i.e. task creation was
+failing. Added one targeted diagnostic around the actual call in
+`ble_keyboard.cpp`'s `startConnectTask()`:
+
+```
+DBG_PRINTF("[BLE] Free heap=%u largest=%u before xTaskCreate\n", ...);
+BaseType_t xr = xTaskCreate(...);
+DBG_PRINTF("[BLE] xTaskCreate returned %d, handle=%p\n", ...);
+```
+
+Confirmed on the first try: `Free heap=25284 largest=8704 before
+xTaskCreate` / `xTaskCreate returned -1, handle=0x0`. The connect task
+needs a 20480-byte stack (see `ble_keyboard.cpp`'s own comment on that
+number — sized for Logitech's complex GATT service tree); the largest
+contiguous free heap block was 8704 bytes. Allocation failure, silent
+(FreeRTOS doesn't touch the output handle on failure, so it stays
+whatever it was — `nullptr` — every subsequent attempt looks identical
+and retries forever, which is exactly the infinite "Auto-reconnect:
+trying keyboard..." loop that had been visible all along without
+explaining anything on its own).
+
+Root cause: this session's own new static allocations (`program_store`'s
+100×160 array, three separate `PROGRAM_TEXT_BUFFER_SIZE` buffers at
+8192 bytes each) had shrunk the ESP32-C3's residual heap pool enough that
+BLE's own initialization burst — tens of KB, largely NimBLE's host/
+controller buffers — now collided with the connect task's stack
+requirement. This wasn't a pre-existing bug in MicroWriter; it's this
+session's own new RAM cost finally landing on the wrong side of a real
+constraint. Fixed by trimming further: `PROGRAM_TEXT_BUFFER_SIZE`
+8192→4096, `MAX_PROGRAM_LINES` 100→60 (`config.h` / `program_store.h`,
+both comments updated in place with the reasoning) — RAM usage dropped
+57.4%→51.6%, and the boot-time heap log went from "90 KiB available for
+dynamic allocation" to "108 KiB." Confirmed live: `Free heap=44132
+largest=27648 before xTaskCreate` → `xTaskCreate returned 1` →
+`[BLE-Task] Connecting to ...` → full HID subscribe sequence →
+`[BLE-Task] Keyboard ready!` — first real BLE connection to complete all
+session.
+
+### `RUN` on a program with a loop froze the entire device
+
+Next test: `10 PRINT 5+3` / `20 GOTO 10`, then `RUN`. Nothing appeared on
+screen; pressing ESC filled the screen with `8`s; eventually the whole
+device stopped responding to *everything*, including the physical Back
+button — required the physical reset button + power-hold to recover
+(not the same as the earlier "disappeared from USB" sleep episode from
+the day before; this was a real hang). Serial (once reconnected)
+showed the actual cause once captured mid-hang:
+
+```
+E (73132) task_wdt: Task watchdog got triggered. The following tasks did not reset the watchdog in time:
+E (73132) task_wdt:  - IDLE (CPU 0)
+E (73132) task_wdt: Tasks currently running:
+E (73132) task_wdt: CPU 0: loopTask
+```
+
+repeating every 10s, forever. Root cause: `mb_run()` is a single blocking
+call — for a program with a loop, it doesn't return until the program
+does, which for `GOTO 10` is never. Since `mb_run()` is called from
+inside `loop()` (via `mbBridgeRunProgram()`/`mbBridgeRunDirect()`),
+*loopTask itself* never returns to the scheduler for as long as the
+program runs, which starves FreeRTOS's idle task solid and trips the
+watchdog — configured here to log, not panic-reboot, so the device just
+sits there, fully unresponsive, indefinitely.
+
+Fixed using My-Basic's `mb_debug_set_stepped_handler()` — a hook called
+before *every* statement, already used internally by My-Basic's own
+debugger support. Registered a handler (`mb_bridge.cpp`) that every 256
+steps: calls `vTaskDelay(1)` (yields to the scheduler, feeds the
+watchdog, keeps BLE/display alive even mid-loop) and drains the input
+queue for a pending Escape or Ctrl+C, aborting the run (returns
+`MB_FUNC_ERR`, which My-Basic's own step-dispatch already treats as an
+abort signal — confirmed by reading `_execute_statement()`'s handling of
+a non-`MB_FUNC_OK` result from the stepped-handler call) and printing
+`?Break` if found.
+
+Why Escape/Ctrl+C from a *BLE* keyboard can reach the queue at all while
+loopTask is blocked inside `mb_run()`: BLE HID notifications are
+processed on the NimBLE host's own FreeRTOS task, not loopTask —
+`enqueueKeyEvent()` is interrupt-safe (`noInterrupts()`/`interrupts()`
+around the ring buffer), so a keypress still lands in the queue
+regardless of what loopTask is doing. The **physical** Back button can't
+do the same today: it only ever becomes a queued event via
+`processPhysicalButtons()`, which itself only runs from `loop()` — the
+same thing that's blocked. Documented as a known gap rather than solved
+tonight (`input_handler.h`'s `inputConsumeBreakPending()` comment spells
+this out); a real fix would need physical-button polling to move
+somewhere that isn't gated on loopTask's own progress.
+
+### Second freeze, same shape, different cause: the display-flush wait loop
+
+Added a second fix alongside the above, for a related but separate
+problem: even with the watchdog/break fix, a running loop's `PRINT`
+output was invisible on screen until the program finished or was broken
+out of — because the *display refresh* is also normally driven from
+`loop()`'s own `updateScreen()`/`pollRefresh()` cycle, which never runs
+while `loop()` itself is stuck inside `mb_run()`. Added
+`screenEditorFlushDisplay()` (declared in `screen_editor.h`, implemented
+in `main.cpp` since that's where the `renderer`/`gpio` instances live),
+called every ~500ms of wall-clock time (not per VM step — a tight loop
+shouldn't try to repaint faster than the e-ink panel's own ~635-650ms
+refresh) from the same stepped handler.
+
+First version of this reintroduced the *exact same watchdog freeze*,
+just relocated: `while (renderer.isRefreshing()) renderer.pollRefresh();`
+is correct logic but a tight busy-spin with no scheduler yield inside
+it — for the ~640ms an e-ink refresh takes, that alone starves the idle
+task just as completely as `mb_run()` did before its own fix. Confirmed
+on hardware (same watchdog spam, but this time WITH the display visibly
+repainting every cycle — proof the flush itself was working, just also
+re-broken the yielding). Also confirmed as a second-order effect: with
+this busy-spin in place, BLE input didn't just feel sluggish, it stopped
+working *entirely* mid-run — the NimBLE host task apparently couldn't get
+scheduled either, so notifications genuinely weren't being delivered,
+not just delayed. Fixed by adding `vTaskDelay(1)` inside the wait loop
+itself (`waitForRefresh()` in `main.cpp`) — same shape as the `mb_run()`
+fix, same lesson: any wait loop introduced to work around loopTask being
+blocked has to yield explicitly, `pollRefresh()`/polling alone isn't
+enough.
+
+### Open at end of session: CLS/CLEAR appeared not to clear the screen
+
+`CLEAR` typed alone does nothing to the screen — traced this to *not*
+being a bug: `CLEAR` is a real My-Basic language keyword (collection
+`.CLEAR()`, unrelated to our `CLS`), confirmed via `grep` for
+`_COLL_ID_CLEAR` in `my_basic_src.inc` — so it was never going to reach
+our code. Not registering it as an alias for CLS is deliberate.
+
+`CLS` is a different story — genuinely still open. `screenEditorReset()`
+(what `mb_cls_func` calls) is straightforward and correct on inspection
+(clears the whole grid array to spaces, resets cursor/logical-line
+state), and My-Basic's own name resolution is case-insensitive on both
+registration and lookup (`_register_func`/`_find_func` both call
+`mb_strupr()` before touching the hash table — confirmed by reading
+both), so a case mismatch was ruled out too. Session ended (device went
+to sleep) before getting a clear answer on what the user actually
+observes — whether the screen doesn't refresh at all when CLS runs, or
+refreshes but e-ink ghosting leaves old content visibly behind (a real,
+separate, well-known e-ink phenomenon on a mostly-text-to-blank
+transition under `FAST_REFRESH`, unrelated to any of this session's
+code) — pick this back up first next session.
+
+A related, less certain report from the same session: occasional
+"phantom" space characters appearing while typing that the user was
+confident they hadn't pressed. Partly explained by the user's own
+admission of an accidental double space in one case; a controlled test
+(a longer line of letters typed with no space bar contact at all)
+showed no `0x2C` (space) keycode anywhere in the raw BLE HID report log
+for that run, yet the user still reported an unexplained leading space —
+so this specific report doesn't reduce to a keyboard-hardware artifact
+the way the very first, less careful report might have. Not chased
+further before the device slept; the dead-key engine
+(`dead_keys.h`, US-International accent composition) and
+`screenEditorInsertCodepoint()`'s row-wrap path were both read and look
+correct on inspection, so the next session should start by reproducing
+with the same careful no-space-bar-contact method and correlating
+against a live raw HID log before touching any code.
