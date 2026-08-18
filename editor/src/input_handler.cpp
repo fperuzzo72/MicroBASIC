@@ -427,11 +427,14 @@ static void startFilesCommand() {
   if (dir && dir.isDirectory()) {
     dir.rewindDirectory();
     char name[256];
+    // Every file in the programs directory is listed, not just *.bas: SAVE
+    // stores under exactly the name typed and doesn't force an extension
+    // (see screen_editor.h), so filtering by .bas here would hide the very
+    // files the user just saved. Only dot-files and subdirectories are
+    // skipped.
     for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
       file.getName(name, sizeof(name));
-      int len = (int)strlen(name);
-      if (name[0] != '.' && len > 4 && strcasecmp(name + len - 4, ".bas") == 0 &&
-          pagingFileCount < MAX_FILES) {
+      if (name[0] != '.' && !file.isDirectory() && pagingFileCount < MAX_FILES) {
         strncpy(pagingFiles[pagingFileCount], name, MAX_FILENAME_LEN - 1);
         pagingFiles[pagingFileCount][MAX_FILENAME_LEN - 1] = '\0';
         pagingFileCount++;
@@ -535,16 +538,18 @@ static void executeLogicalLine(const char* line) {
     static char nameBuf[MAX_FILENAME_LEN];
     stripQuotes(arg, nameBuf, sizeof(nameBuf));
     screenEditorClearLogicalLine();
-    bool ok = screenEditorSaveProgram(nameBuf);
-    screenEditorTermPrintLine(ok ? "Saved." : "?Save failed");
+    const ProgramFileResult r = screenEditorSaveProgram(nameBuf);
+    screenEditorTermPrintLine(r == ProgramFileResult::OK ? "Saved."
+                                                         : programFileResultMessage(r));
     return;
   }
   if (const char* arg = wordArg("LOAD")) {
     static char nameBuf[MAX_FILENAME_LEN];
     stripQuotes(arg, nameBuf, sizeof(nameBuf));
     screenEditorClearLogicalLine();
-    bool ok = screenEditorLoadProgram(nameBuf);
-    screenEditorTermPrintLine(ok ? "Loaded." : "?File not found");
+    const ProgramFileResult r = screenEditorLoadProgram(nameBuf);
+    screenEditorTermPrintLine(r == ProgramFileResult::OK ? "Loaded."
+                                                         : programFileResultMessage(r));
     return;
   }
 

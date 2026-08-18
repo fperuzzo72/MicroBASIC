@@ -80,12 +80,35 @@ int screenEditorRowsLeftOnScreen();
 void screenEditorTermPrint(const char* utf8Text);
 void screenEditorTermPrintLine(const char* utf8Text);  // + trailing newline
 
-// --- SAVE/LOAD: the actual program (program_store.h) as a .bas file ---
-// `name` gets a .bas extension appended if it doesn't already have one,
-// same sanitizing as the original grid-based save (no '/', truncated).
-// Stored under /MicroBASIC/programs/ on the SD card.
-bool screenEditorSaveProgram(const char* name);
-bool screenEditorLoadProgram(const char* name);  // replaces the program store
+// --- SAVE/LOAD: the actual program (program_store.h), as plain text ---
+// Stored under /MicroBASIC/programs/, under exactly the name typed -- no
+// extension is forced on, so SAVE "TESTE" produces a file called TESTE.
+// LOAD tries the typed name first and falls back to name + ".bas", so
+// round-tripping works either way and a .bas dropped in from a PC is still
+// found by its bare name.
+//
+// The file content is always plain text (`10 PRINT "X"` per line, exactly
+// what LIST shows), never a tokenised/binary form, so programs can be read
+// and edited directly off the SD card without this firmware.
+//
+// These report *why* they failed rather than a bare bool: in a BASIC
+// environment the difference between "no such file", "disk error" and
+// "program too big to serialise" is exactly what the user needs to act on,
+// and all three used to surface as the same "?Save failed".
+enum class ProgramFileResult {
+  OK,
+  BAD_NAME,    // empty, or nothing usable left after sanitising
+  NOT_FOUND,   // LOAD only
+  TOO_LARGE,   // program doesn't fit PROGRAM_TEXT_BUFFER_SIZE, or file bigger than it
+  IO_ERROR,    // SD read/write failed
+  EMPTY,       // LOAD only: file read fine but held no valid numbered lines
+};
+
+// One-line message for the terminal, e.g. "?File not found". Never null.
+const char* programFileResultMessage(ProgramFileResult r);
+
+ProgramFileResult screenEditorSaveProgram(const char* name);
+ProgramFileResult screenEditorLoadProgram(const char* name);  // replaces the program store
 
 // Draws the terminal and blocks until the e-ink refresh finishes. Normal
 // screen updates go through main.cpp's loop() (draw, then poll the

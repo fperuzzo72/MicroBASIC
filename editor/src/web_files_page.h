@@ -10,13 +10,14 @@
 // of small .txt notes, so this keeps only what's generic — card layout,
 // CSS variables (light/dark via prefers-color-scheme), upload form, file
 // table, delete confirmation — reimplemented against this device's own
-// /api/files, /upload, /delete, /notes/<name> endpoints (wifi_sync.cpp).
+// /api/files, /upload, /delete and /<collection>/<name> endpoints
+// (wifi_sync.cpp), which are all scoped by a ?c=notes|programs tab.
 static const char FILES_PAGE_HTML[] = R"HTML(<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Files - MicroWriter</title>
+<title>Files - MicroBASIC</title>
 <style>
 :root {
   --font-color: #333;
@@ -106,10 +107,34 @@ td.actions a, td.actions button { margin-left: 8px; }
 .modal-backdrop.open { display: flex; }
 .modal { background: var(--card-bg); border-radius: 8px; padding: 20px; max-width: 320px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.tab {
+  flex: 1;
+  padding: 10px 14px;
+  border: none; border-radius: 8px 8px 0 0;
+  background: var(--card-bg); color: var(--label-color);
+  font-size: 15px; cursor: pointer;
+  border-bottom: 3px solid transparent;
+}
+/* These need to out-specify the generic `button`/`button:hover` rules above,
+   which would otherwise paint a tab as a filled accent-coloured button --
+   unreadable once .tab.active also sets the text to that same accent. */
+.tab:hover { background: var(--accent-color-10); color: var(--font-color); }
+.tab.active, .tab.active:hover {
+  background: var(--card-bg);
+  color: var(--accent-color);
+  border-bottom-color: var(--accent-color);
+  font-weight: 600;
+}
 </style>
 </head>
 <body>
-<h1>MicroWriter &mdash; Files</h1>
+<h1>MicroBASIC &mdash; Files</h1>
+
+<div class="tabs" id="tabs">
+  <button class="tab active" data-c="notes" onclick="selectTab('notes')">Notes</button>
+  <button class="tab" data-c="programs" onclick="selectTab('programs')">BASIC programs</button>
+</div>
 
 <div class="card">
   <div class="dropzone" id="dropzone">
@@ -140,6 +165,43 @@ td.actions a, td.actions button { margin-left: 8px; }
 <script>
 let pendingDeleteName = null;
 
+// Everything on this page is scoped to whichever tab is selected: the two
+// collections live in different directories on the device and have different
+// upload rules, so the collection id travels with every request.
+const COLLECTIONS = {
+  notes: {
+    accept: '.txt',
+    dropLabel: 'Drop a .txt file here, or click to choose one',
+    emptyMsg: 'No notes yet.',
+    // The device forces .txt on upload, so reject anything else up front
+    // rather than silently renaming it.
+    validate: n => n.toLowerCase().endsWith('.txt') || 'Only .txt files are supported.'
+  },
+  programs: {
+    accept: '',
+    dropLabel: 'Drop a BASIC program here, or click to choose one',
+    emptyMsg: 'No programs yet.',
+    // Programs are stored under exactly the name given, no extension
+    // required -- same rule as SAVE on the device.
+    validate: () => true
+  }
+};
+let current = 'notes';
+
+function selectTab(c) {
+  if (!COLLECTIONS[c]) return;
+  current = c;
+  for (const btn of document.querySelectorAll('.tab')) {
+    btn.classList.toggle('active', btn.dataset.c === c);
+  }
+  const cfg = COLLECTIONS[c];
+  document.getElementById('dropzoneLabel').textContent = cfg.dropLabel;
+  document.getElementById('fileInput').setAttribute('accept', cfg.accept);
+  document.getElementById('emptyMsg').textContent = cfg.emptyMsg;
+  setStatus('', '');
+  loadFiles();
+}
+
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -158,7 +220,7 @@ function setStatus(msg, cls) {
 async function loadFiles() {
   let files = [];
   try {
-    const res = await fetch('/api/files');
+    const res = await fetch('/api/files?c=' + current);
     files = await res.json();
   } catch (e) {
     setStatus('Could not reach the device.', 'error');
@@ -175,7 +237,7 @@ async function loadFiles() {
       '<td>' + safeName + '</td>' +
       '<td class="size">' + formatSize(f.size) + '</td>' +
       '<td class="actions">' +
-        '<a class="btn" href="/notes/' + encodeURIComponent(f.name) + '" download>Download</a>' +
+        '<a class="btn" href="/' + current + '/' + encodeURIComponent(f.name) + '" download>Download</a>' +
         '<button class="danger" onclick="openDeleteModal(\'' + f.name.replace(/'/g, "\\'") + '\')">Delete</button>' +
       '</td>';
     rows.appendChild(tr);
@@ -196,7 +258,7 @@ async function confirmDelete() {
   const name = pendingDeleteName;
   closeDeleteModal();
   try {
-    const res = await fetch('/delete', {
+    const res = await fetch('/delete?c=' + current, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'name=' + encodeURIComponent(name)
@@ -210,15 +272,16 @@ async function confirmDelete() {
 }
 
 async function uploadFile(file) {
-  if (!file.name.toLowerCase().endsWith('.txt')) {
-    setStatus('Only .txt files are supported.', 'error');
+  const check = COLLECTIONS[current].validate(file.name);
+  if (check !== true) {
+    setStatus(check, 'error');
     return;
   }
   setStatus('Uploading ' + file.name + '...', '');
   const form = new FormData();
   form.append('file', file);
   try {
-    const res = await fetch('/upload', { method: 'POST', body: form });
+    const res = await fetch('/upload?c=' + current, { method: 'POST', body: form });
     const text = await res.text();
     if (!res.ok) throw new Error(text);
     setStatus('Uploaded ' + file.name + '.', 'ok');
@@ -244,7 +307,7 @@ dropzone.addEventListener('drop', e => {
   if (file) uploadFile(file);
 });
 
-loadFiles();
+selectTab('notes');
 </script>
 </body>
 </html>

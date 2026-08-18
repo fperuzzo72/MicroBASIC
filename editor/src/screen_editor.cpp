@@ -7,6 +7,7 @@
 #include <Utf8.h>
 #include <cstdio>
 #include <cstring>
+#include <strings.h>  // strcasecmp
 
 struct ScreenModeInfo {
   int cols, rows, cellW, cellH, marginX, fontId;
@@ -253,20 +254,58 @@ void screenEditorTermPrintLine(const char* utf8Text) {
 // --- SAVE/LOAD -------------------------------------------------------------
 
 static const char* PROGRAMS_DIR = "/MicroBASIC/programs";
+static const char* PROGRAM_EXT = ".bas";
 
+// Big enough for the worst case by construction rather than by guess:
+// directory + '/' + a full-length sanitised name + extension + NUL. The
+// previous fixed 80 was 9 bytes short of that, so a long name silently
+// produced a truncated (wrong) path instead of the file you asked for.
+static constexpr int PROGRAM_PATH_MAX =
+    20 /*strlen(PROGRAMS_DIR)*/ + 1 + MAX_FILENAME_LEN + 4 /*.bas*/ + 1;
+
+const char* programFileResultMessage(ProgramFileResult r) {
+  switch (r) {
+    case ProgramFileResult::OK:        return "Ok";
+    case ProgramFileResult::BAD_NAME:  return "?Bad file name";
+    case ProgramFileResult::NOT_FOUND: return "?File not found";
+    case ProgramFileResult::TOO_LARGE: return "?Program too large";
+    case ProgramFileResult::IO_ERROR:  return "?Disk error";
+    case ProgramFileResult::EMPTY:     return "?No program lines in file";
+  }
+  return "?Error";
+}
+
+// Maps a typed name onto something FAT can actually hold. Path separators
+// and the characters FAT/SdFat reject become '_', leading/trailing spaces go
+// (they're invisible in a listing and make files unopenable by the name
+// shown), and everything else passes through -- including accents, which
+// long filenames support and which a Portuguese-speaking user will type.
 static void sanitizeFilename(const char* name, char* out, int outSize) {
+  while (*name == ' ') name++;
   int n = 0;
   for (const char* p = name; *p && n < outSize - 1; p++) {
-    out[n++] = (*p == '/' || *p == '\\') ? '_' : *p;
+    const char c = *p;
+    const bool illegal = (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' ||
+                          c == '"' || c == '<' || c == '>' || c == '|');
+    out[n++] = illegal ? '_' : c;
   }
+  while (n > 0 && out[n - 1] == ' ') n--;  // trailing spaces
   out[n] = '\0';
 }
 
-static void buildProgramPath(const char* name, char* path, int pathSize) {
+// Builds the path for exactly the name as typed -- no extension is forced on.
+// SAVE "TESTE" makes a file called TESTE, not TESTE.bas: the name you type is
+// the name you get. LOAD compensates by also trying the .bas form (see
+// screenEditorLoadProgram), so `SAVE "X"` / `LOAD "X"` round-trips and
+// `LOAD "X"` still finds an X.bas that came from somewhere else.
+// Returns false if nothing usable is left of the name after sanitising.
+static bool buildProgramPath(const char* name, const char* suffix, char* path, int pathSize) {
+  if (!name) return false;
   char safe[MAX_FILENAME_LEN];
   sanitizeFilename(name, safe, sizeof(safe));
-  bool hasExt = strlen(safe) > 4 && strcmp(safe + strlen(safe) - 4, ".bas") == 0;
-  snprintf(path, pathSize, "%s/%s%s", PROGRAMS_DIR, safe, hasExt ? "" : ".bas");
+  if (!safe[0]) return false;
+  snprintf(path, pathSize, "%s/%s%s", PROGRAMS_DIR, safe, suffix);
+  return true;
 }
 
 static void ensureProgramsDir() {
@@ -274,35 +313,63 @@ static void ensureProgramsDir() {
   if (!SdMan.exists(PROGRAMS_DIR)) SdMan.mkdir(PROGRAMS_DIR);
 }
 
-bool screenEditorSaveProgram(const char* name) {
-  if (!name || !name[0]) return false;
-  ensureProgramsDir();
+ProgramFileResult screenEditorSaveProgram(const char* name) {
+  char path[PROGRAM_PATH_MAX];
+  if (!buildProgramPath(name, "", path, sizeof(path))) return ProgramFileResult::BAD_NAME;
 
+  // Content is always plain text -- "10 PRINT ..." one line per line, exactly
+  // as LIST shows it -- so a saved program can be read (and edited) straight
+  // off the SD card on a PC without this firmware to decode it. Only the
+  // *name* is left alone; the format is deliberately not a binary/tokenised
+  // one for that reason.
   static char buf[PROGRAM_TEXT_BUFFER_SIZE];
   if (!programStoreSerialize(buf, sizeof(buf))) {
     DBG_PRINTLN("[MB] Save failed: program text too large for buffer");
-    return false;
+    return ProgramFileResult::TOO_LARGE;
   }
 
-  char path[80];
-  buildProgramPath(name, path, sizeof(path));
-  bool ok = sdWriteFile(path, buf);
+  ensureProgramsDir();
+  const bool ok = sdWriteFile(path, buf);
   DBG_PRINTF("[MB] Save %s -> %s\n", path, ok ? "OK" : "FAILED");
-  return ok;
+  return ok ? ProgramFileResult::OK : ProgramFileResult::IO_ERROR;
 }
 
-bool screenEditorLoadProgram(const char* name) {
-  if (!name || !name[0]) return false;
-  char path[80];
-  buildProgramPath(name, path, sizeof(path));
+ProgramFileResult screenEditorLoadProgram(const char* name) {
+  char path[PROGRAM_PATH_MAX];
+  if (!buildProgramPath(name, "", path, sizeof(path))) return ProgramFileResult::BAD_NAME;
+
+  // Exactly what was typed wins; only if that doesn't exist do we try the
+  // .bas form, so a program saved by name still loads by that same name
+  // while `LOAD "X"` also finds an X.bas put there by other means.
+  if (!SdMan.exists(path)) {
+    char withExt[PROGRAM_PATH_MAX];
+    if (buildProgramPath(name, PROGRAM_EXT, withExt, sizeof(withExt)) && SdMan.exists(withExt)) {
+      memcpy(path, withExt, sizeof(path));
+    } else {
+      DBG_PRINTF("[MB] Load %s -> NOT FOUND (also tried %s)\n", path, withExt);
+      return ProgramFileResult::NOT_FOUND;
+    }
+  }
 
   static char buf[PROGRAM_TEXT_BUFFER_SIZE];
   if (!sdReadFile(path, buf, sizeof(buf))) {
-    DBG_PRINTF("[MB] Load %s -> FAILED (not found)\n", path);
-    return false;
+    // Distinguishable from NOT_FOUND now that existence was checked first:
+    // a file that exists but won't read is either a disk problem or bigger
+    // than the buffer (sdReadFile reads at most bufSize-1 and can't tell us
+    // which), and either way "not found" was the wrong thing to report.
+    DBG_PRINTF("[MB] Load %s -> READ FAILED\n", path);
+    return ProgramFileResult::IO_ERROR;
   }
 
   programStoreLoadSerialized(buf);
+  if (programStoreCount() == 0) {
+    // Read fine but yielded nothing: an empty file, or a text file that
+    // isn't a BASIC program. Silently ending up with an empty program and an
+    // "Ok" was actively misleading -- it looked like the load had worked.
+    DBG_PRINTF("[MB] Load %s -> no valid lines\n", path);
+    return ProgramFileResult::EMPTY;
+  }
+
   DBG_PRINTF("[MB] Load %s -> OK (%d lines)\n", path, programStoreCount());
-  return true;
+  return ProgramFileResult::OK;
 }

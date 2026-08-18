@@ -447,6 +447,48 @@ static void pollConnection() {
 // HTTP Server
 // =========================================================================
 
+// --- Collections ----------------------------------------------------------
+// The browser file manager serves two separate directories as tabs: the
+// prose editor's notes and the BASIC programs. Everything below (list,
+// download, upload, delete) is written against this descriptor rather than
+// hardcoding /notes, so the two tabs share one implementation.
+struct Collection {
+  const char* id;        // query-string value, and the URL prefix for downloads
+  const char* dir;       // where it lives on the SD card
+  const char* listExt;   // only list files ending in this, or "" to list all
+  const char* forceExt;  // extension forced on upload, or "" to accept as-is
+  size_t maxFileSize;    // reject uploads bigger than what the device can load
+};
+
+static const Collection COLLECTIONS[] = {
+    // Notes must stay filtered to .txt: the editor's save keeps one
+    // generation of .bak alongside each note, and those are backups, not
+    // files to offer for download or deletion.
+    {"notes", "/notes", ".txt", ".txt", TEXT_BUFFER_SIZE - 1},
+    // Programs are listed unfiltered and uploaded as-is: SAVE stores under
+    // exactly the name typed with no forced extension (see screen_editor.h),
+    // so filtering here would hide the files the user just saved.
+    {"programs", "/MicroBASIC/programs", "", "", PROGRAM_TEXT_BUFFER_SIZE - 1},
+};
+static constexpr int COLLECTION_COUNT = sizeof(COLLECTIONS) / sizeof(COLLECTIONS[0]);
+
+// Which collection the in-flight upload targets. Set once at
+// UPLOAD_FILE_START and read by the later WRITE callbacks, which have no
+// access to the request's query string.
+static const Collection* uploadColl = nullptr;
+
+// Defaults to notes when absent or unrecognised, so old clients and a bare
+// /api/files keep behaving exactly as before.
+static const Collection& collectionFromArg() {
+  if (server->hasArg("c")) {
+    String want = server->arg("c");
+    for (int i = 0; i < COLLECTION_COUNT; i++) {
+      if (want == COLLECTIONS[i].id) return COLLECTIONS[i];
+    }
+  }
+  return COLLECTIONS[0];
+}
+
 static void handleFileList() {
   lastHttpActivityMs = millis();
   if (!pcConnected) {
@@ -454,10 +496,14 @@ static void handleFileList() {
     screenDirty = true;
   }
 
-  auto dir = SdMan.open("/notes");
+  const Collection& coll = collectionFromArg();
+
+  auto dir = SdMan.open(coll.dir);
   if (!dir || !dir.isDirectory()) {
     if (dir) dir.close();
-    server->send(500, "application/json", "[]");
+    // An absent directory is normal (nothing saved yet), not an error --
+    // reporting 500 made the programs tab look broken on a fresh device.
+    server->send(200, "application/json", "[]");
     return;
   }
 
@@ -465,21 +511,27 @@ static void handleFileList() {
   bool first = true;
   char name[256];
 
+  const size_t extLen = strlen(coll.listExt);
   dir.rewindDirectory();
   for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
     file.getName(name, sizeof(name));
-    if (name[0] == '.') { file.close(); continue; }
+    if (name[0] == '.' || file.isDirectory()) { file.close(); continue; }
 
-    int nameLen = strlen(name);
-    if (nameLen > 4 && strcmp(name + nameLen - 4, ".txt") == 0) {
-      if (!first) json += ",";
-      first = false;
-      json += "{\"name\":\"";
-      json += name;
-      json += "\",\"size\":";
-      json += String((unsigned long)file.size());
-      json += "}";
+    if (extLen) {
+      const size_t nameLen = strlen(name);
+      if (nameLen <= extLen || strcasecmp(name + nameLen - extLen, coll.listExt) != 0) {
+        file.close();
+        continue;
+      }
     }
+
+    if (!first) json += ",";
+    first = false;
+    json += "{\"name\":\"";
+    json += name;
+    json += "\",\"size\":";
+    json += String((unsigned long)file.size());
+    json += "}";
     file.close();
   }
   dir.close();
@@ -488,23 +540,37 @@ static void handleFileList() {
   server->send(200, "application/json", json);
 }
 
-static void handleFileDownload() {
+// Serves /<collection-id>/<filename> for any collection, e.g. /notes/x.txt
+// or /programs/HELLO. Returns false if the URI doesn't name a collection.
+static bool handleFileDownload() {
   lastHttpActivityMs = millis();
 
   String uri = server->uri();
-  if (!uri.startsWith("/notes/") || uri.length() <= 7) {
-    server->send(400, "text/plain", "Bad request");
-    return;
+  const Collection* coll = nullptr;
+  int nameStart = 0;
+  for (int i = 0; i < COLLECTION_COUNT; i++) {
+    String prefix = String("/") + COLLECTIONS[i].id + "/";
+    if (uri.startsWith(prefix) && uri.length() > prefix.length()) {
+      coll = &COLLECTIONS[i];
+      nameStart = prefix.length();
+      break;
+    }
+  }
+  if (!coll) return false;
+
+  String filename = uri.substring(nameStart);
+  if (filename.indexOf("..") >= 0 || filename.indexOf('/') >= 0) {
+    server->send(400, "text/plain", "Invalid name");
+    return true;
   }
 
-  String filename = uri.substring(7);
   char path[320];
-  snprintf(path, sizeof(path), "/notes/%s", filename.c_str());
+  snprintf(path, sizeof(path), "%s/%s", coll->dir, filename.c_str());
 
   auto file = SdMan.open(path, O_RDONLY);
   if (!file) {
     server->send(404, "text/plain", "Not found");
-    return;
+    return true;
   }
 
   size_t fileSize = file.size();
@@ -522,7 +588,8 @@ static void handleFileDownload() {
   // Track: PC downloaded a file from device = "sent"
   filesSent++;
   screenDirty = true;
-  DBG_PRINTF("[SYNC] Sent file: %s\n", filename.c_str());
+  DBG_PRINTF("[SYNC] Sent file: %s\n", path);
+  return true;
 }
 
 static void handleSyncComplete() {
@@ -553,15 +620,28 @@ static void handleNoteUploadData() {
   if (upload.status == UPLOAD_FILE_START) {
     if (!pcConnected) { pcConnected = true; screenDirty = true; }
 
-    // Sanitize: filename only (no path), force a .txt extension, clamp length.
+    // Which tab uploaded this. Captured here, at FILE_START, and kept for
+    // the rest of the transfer: the size limit differs per collection and
+    // the WRITE/END callbacks don't get to re-read the query string.
+    const Collection& coll = collectionFromArg();
+    uploadColl = &coll;
+
+    // Sanitize: filename only (no path), clamp length, and force the
+    // collection's extension if it has one (programs don't -- they're stored
+    // under exactly the name given, matching SAVE).
     String filename = upload.filename;
     int slash = filename.lastIndexOf('/');
     if (slash >= 0) filename = filename.substring(slash + 1);
-    if (filename.length() == 0) filename = "upload.txt";
-    if (!filename.endsWith(".txt")) filename += ".txt";
+    if (filename.length() == 0) filename = String("upload") + coll.forceExt;
+    if (coll.forceExt[0] && !filename.endsWith(coll.forceExt)) filename += coll.forceExt;
     if ((int)filename.length() > MAX_FILENAME_LEN - 1) filename = filename.substring(0, MAX_FILENAME_LEN - 1);
 
-    snprintf(noteUpload.path, sizeof(noteUpload.path), "/notes/%s", filename.c_str());
+    if (strcmp(coll.id, "programs") == 0) {
+      if (!SdMan.exists("/MicroBASIC")) SdMan.mkdir("/MicroBASIC");
+      if (!SdMan.exists(coll.dir)) SdMan.mkdir(coll.dir);
+    }
+
+    snprintf(noteUpload.path, sizeof(noteUpload.path), "%s/%s", coll.dir, filename.c_str());
     noteUpload.file = SdMan.open(noteUpload.path, O_WRONLY | O_CREAT | O_TRUNC);
     noteUpload.bytesWritten = 0;
     noteUpload.tooLarge = false;
@@ -572,8 +652,10 @@ static void handleNoteUploadData() {
     if (!noteUpload.ok) return;
     // Reject before it becomes another instance of the TEXT_BUFFER_SIZE
     // silent-truncation trap (see config.h) — a note that can't fully load
-    // into the editor shouldn't be accepted in the first place.
-    if (noteUpload.bytesWritten + upload.currentSize > TEXT_BUFFER_SIZE - 1) {
+    // into the editor shouldn't be accepted in the first place. Programs get
+    // the same treatment against their own (smaller) load buffer.
+    if (noteUpload.bytesWritten + upload.currentSize >
+        (uploadColl ? uploadColl->maxFileSize : TEXT_BUFFER_SIZE - 1)) {
       noteUpload.ok = false;
       noteUpload.tooLarge = true;
       noteUpload.file.close();
@@ -602,14 +684,19 @@ static void handleNoteUploadData() {
 // Called once after the whole request body has been consumed — sends the response.
 static void handleNoteUploadDone() {
   lastHttpActivityMs = millis();
+  const size_t limit = uploadColl ? uploadColl->maxFileSize : TEXT_BUFFER_SIZE - 1;
   if (noteUpload.ok) {
-    refreshFileList();
+    // Only the notes list is mirrored in the device's own file browser.
+    if (!uploadColl || strcmp(uploadColl->id, "notes") == 0) refreshFileList();
     server->send(200, "text/plain", "OK");
   } else if (noteUpload.tooLarge) {
-    server->send(400, "text/plain", "File too large (16KB max per note)");
+    char msg[64];
+    snprintf(msg, sizeof(msg), "File too large (%uKB max)", (unsigned)((limit + 1) / 1024));
+    server->send(400, "text/plain", msg);
   } else {
     server->send(400, "text/plain", "Upload failed");
   }
+  uploadColl = nullptr;
 }
 
 static void handleDeleteNote() {
@@ -618,32 +705,33 @@ static void handleDeleteNote() {
     server->send(400, "text/plain", "Missing name");
     return;
   }
+  const Collection& coll = collectionFromArg();
   String name = server->arg("name");
-  // No path traversal or targeting anything outside /notes/.
+  // No path traversal or targeting anything outside the collection's dir.
   if (name.length() == 0 || name.indexOf('/') >= 0 || name.indexOf("..") >= 0) {
     server->send(400, "text/plain", "Invalid name");
     return;
   }
   char path[320];
-  snprintf(path, sizeof(path), "/notes/%s", name.c_str());
+  snprintf(path, sizeof(path), "%s/%s", coll.dir, name.c_str());
   if (!SdMan.exists(path)) {
     server->send(404, "text/plain", "Not found");
     return;
   }
-  deleteFile(name.c_str());  // also removes the .bak and refreshes the list
+  if (strcmp(coll.id, "notes") == 0) {
+    deleteFile(name.c_str());  // also removes the .bak and refreshes the list
+  } else {
+    // Programs have no .bak generation and aren't in the device's file
+    // browser, so a plain remove is the whole job.
+    SdMan.remove(path);
+  }
   server->send(200, "text/plain", "OK");
   screenDirty = true;
-  DBG_PRINTF("[SYNC] Deleted via browser: %s\n", name.c_str());
+  DBG_PRINTF("[SYNC] Deleted via browser: %s\n", path);
 }
 
 static void handleNotFound() {
-  String uri = server->uri();
-
-  if (uri.startsWith("/notes/") && uri.length() > 7 && server->method() == HTTP_GET) {
-    handleFileDownload();
-    return;
-  }
-
+  if (server->method() == HTTP_GET && handleFileDownload()) return;
   server->send(404, "text/plain", "Not found");
 }
 
