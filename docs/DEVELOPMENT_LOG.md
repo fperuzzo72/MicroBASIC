@@ -943,3 +943,20 @@ falling through to `mbBridgeRunDirect("CL S")`, which would fail to
 parse as anything meaningful and do nothing visible. Worth confirming
 directly next session, but no longer worth treating as a separate,
 unexplained bug.
+
+One more data point from the user, important for whoever picks this up:
+the phantom presses are **not** limited to the moment a keyboard
+connects (already knew that) and, more importantly, the *rate* got
+noticeably worse after this session's BASIC-integration changes landed
+— it was apparently a rare, easy-to-miss annoyance on plain MicroSlate/
+MicroWriter before, not the frequent, typing-breaking problem it is now.
+Nothing this session touched the ADC/InputManager code path directly
+before tonight's revert, so the plausible link is indirect: added heap/
+DRAM pressure (this session's My-Basic + program_store allocations,
+partially clawed back but still a net addition), and/or altered timing
+around `esp_pm_configure`'s CPU-frequency scaling (80/10MHz) and light
+sleep, could be changing how often loop() iterations land during
+whatever noise event causes this, or subtly affecting the analog
+frontend during frequency transitions. Worth testing directly: does the
+phantom-press rate drop if `mbBridgeSetup()`/My-Basic's heap footprint
+is temporarily removed on an otherwise-identical build?
