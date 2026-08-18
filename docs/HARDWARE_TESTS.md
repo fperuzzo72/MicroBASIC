@@ -105,7 +105,20 @@ test is the device side actually serving the new collection parameter.
 - [ ] Upload something too large on each tab — expect a clear size error,
       not a truncated file.
 
-## 6. Regression check
+## 6. TinyBasic interpreter — *nothing to test yet*
+
+The patch set is in place and the interpreter compiles and links, but nothing
+calls it: `mb_bridge.cpp` (My-Basic) is still what runs behind the screen
+editor, and the firmware on the device is unaffected by it. **No hardware test
+applies until the switchover happens.**
+
+The one thing worth knowing now: when it is switched over, RAM goes from ~51%
+to ~59% (the interpreter's 16KB `MEMSIZE` plus its statics). That should come
+back down once My-Basic and the three 4KB whole-program text buffers go away,
+but it's the number to watch — BLE needs a 20KB contiguous allocation at
+connect time, and we've been on the wrong side of that once already.
+
+## 7. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).

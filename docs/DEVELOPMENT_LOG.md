@@ -1561,3 +1561,108 @@ particular is exactly the kind of code that fails subtly and would have been
 miserable to diagnose through a serial log — and the suite did immediately
 flag one real behaviour (the rewriter upper-cases `gosub`), which turned out
 to be harmless but was worth knowing rather than discovering on device.
+
+
+## TinyBasic patch set: fetched, patched, compiling and linking
+
+Built the patch set for swapping My-Basic out for Stefan Lenz's IoT BASIC.
+`patches/tinybasic/` now fetches upstream at a pinned commit, patches it, and
+`editor/src/tb_runtime.cpp` implements its runtime against this firmware's own
+screen terminal and SD card. It compiles and links; nothing calls it yet.
+
+### Which upstream variant, and why it matters
+
+Upstream ships the interpreter twice -- `Basic2/Posix/basic.c` and
+`Basic2/IoTBasic/IoTBasic.ino` -- differing by 82 lines. Took the **Posix**
+one despite this being an Arduino-framework build, because it is plain portable
+C with no Arduino dependencies (confirmed by compiling it standalone on the
+host), which makes it usable as a library. The Arduino variant is a *sketch*,
+and its companion `runtime.cpp` is 6243 lines of display/keyboard/sensor
+drivers we'd spend the integration fighting rather than using. The Posix
+runtime (2212 lines) served as the reference for what a minimal runtime looks
+like, but isn't used either -- ours replaces it.
+
+### The runtime contract, found by experiment rather than reading
+
+Rather than trying to infer the interface from documentation, compiled
+`basic.c` with no runtime at all and diffed its undefined symbols against what
+upstream's runtime defines. That gives the contract exactly: **76 symbols**.
+Turning off the feature flags we don't want (`01_configure_language.py`) only
+took it from 84 to 76 -- the rest are referenced from dispatch tables that
+compile in regardless of features, so they must exist even though the
+configured language set can never reach them.
+
+Splitting those 76: roughly 39 are real work (character I/O, the filesystem,
+timing, scheduling, memory reporting) and the rest are peripherals this device
+doesn't expose to BASIC (GPIO, analog, MQTT, RTC, printer, EEPROM, profiling
+hooks) which are stubbed. A late correction: eleven of the names turned out to
+be **variables**, not functions (`id`, `od`, `ioer`, `charcount[5]`,
+`breaksignal`, ...) that the runtime is expected to define. `charcount` in
+particular is not incidental -- it's the per-device output column, and it's how
+the interpreter implements `PRINT`'s comma tab stops, so `tb_runtime.cpp`
+maintains it in `outch()` rather than leaving it at zero.
+
+### Four patches, and what each one is actually for
+
+1. **`01_configure_language.py`** -- explicit feature set instead of upstream's
+   board-size heuristics, which on an ESP32-C3 would enable everything
+   including Wi-Fi, MQTT, sensors and camera. Keeps what makes this feel like
+   MSX BASIC: `HASMSSTRINGS` (`LEFT$`/`RIGHT$`/`MID$`/`ASC`/`CHR$`) and
+   `HASDARTMOUTH` (`DEF FN`, `ON..GOTO/GOSUB`, `READ`/`DATA`).
+2. **`02_rename_entry_points.py`** -- `setup()`/`loop()` collide with the
+   firmware's own, so they become `basicSetup()`/`basicLoop()`, and upstream's
+   `main()` is removed. This one bit: the first version cut from `#ifndef
+   ARDUINO` to the *first* `#endif`, but there's a nested `#ifdef HASARGS`
+   inside `main`, so it sliced the block in half and left dangling code. The
+   error surfaced far away as "expected identifier before 'while'". Now counts
+   preprocessor nesting properly.
+3. **`03_c_linkage_and_config.py`** -- `extern "C"` guards (interpreter is C,
+   our runtime must be C++ to talk to the screen editor and SDCardManager);
+   real `stdint.h` in place of the Posix variant's hand-rolled Arduino-compat
+   typedefs, which collide with the genuine ones here ("conflicting declaration
+   'typedef unsigned int uint32_t'"); and a fixed `MEMSIZE` of 16KB rather than
+   upstream's `0` = "grab most of free RAM", which is precisely what must not
+   happen on a device where BLE needs a 20KB contiguous block at connect time.
+4. **`04_library_build_flags.py`** -- a `library.json` scoping this project's
+   warnings-as-errors away from third-party code. Same decision as the My-Basic
+   `#pragma` wrapper, but cleaner: PlatformIO applies the flags to that
+   directory only.
+
+### Verifying it actually links
+
+Compiling isn't proof: with nothing referencing the interpreter, the linker
+drops the whole object and never checks the contract. Confirmed this was
+happening -- `basic.c.o` was a 973KB object, and `nm` on the final ELF found
+zero interpreter symbols.
+
+Forced a real link with a temporary call. First attempt still didn't work,
+because an unreachable function gets removed by `--gc-sections`; a
+`volatile`-guarded call does the job, since the optimiser can't prove it's
+never taken. Result: **links clean, no undefined references**, at a cost of
+~21KB RAM (52.3% -> 58.9%) and ~40KB flash. The only symbols `basic.c` still
+wants are `atan`, `millis` and `trunc`, all from libm/Arduino at final link.
+
+The probe was then reverted, so the firmware on the device is unchanged and
+still the working My-Basic build.
+
+### What's left
+
+The switchover itself. In rough order:
+
+- Implement `consins()` -- currently a stub returning "no line available". This
+  is the real join between the two worlds: upstream reads a line by driving its
+  own console, while here the console is a character grid with a freely movable
+  cursor, wrapped logical lines and its own Enter semantics (`screen_editor.h`).
+  Line editing stays ours; `consins()` should hand over a completed line.
+- Point `SCREEN_EDITOR`'s Enter handling at `basicLoop()` instead of
+  `mbBridgeRunDirect()`/`mbBridgeRunProgram()`.
+- Decide what happens to `program_store.cpp`. The interpreter has its own
+  tokenised program memory, so the packed buffer becomes redundant for
+  *storage* -- but `LIST`/`SAVE`/`LOAD`/`VC` are all built on it. Cheapest path
+  is probably to let the interpreter own the program and re-point those at its
+  own `LIST`/`SAVE`/`LOAD`, which is also the more authentic behaviour.
+- Retire `mb_bridge.cpp`, `program_store`'s `rewriteGotoGosub` (the `L%d:` label
+  hack exists only because My-Basic has no line numbers) and the MyBasic
+  library once nothing references them.
+- Reclaim RAM: dropping My-Basic and `PROGRAM_TEXT_BUFFER_SIZE`'s three 4KB
+  buffers should more than pay for the interpreter's 16KB `MEMSIZE`.

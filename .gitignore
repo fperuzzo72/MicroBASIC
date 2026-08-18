@@ -7,6 +7,14 @@ build/
 *.local*
 *.log
 
+# Stefan Lenz's IoT BASIC interpreter core, fetched at build time by
+# patches/tinybasic/fetch.sh rather than vendored -- upstream's licensing is
+# ambiguous (LICENSE says BSD-3, every source header still says GPL v3) and
+# keeping it out of the tree sidesteps the question entirely. Run that script
+# to populate this directory; ../_backups/stefan-tinybasic.bundle is a
+# full-history mirror in case upstream disappears.
+editor/lib/TinyBasic/
+
 # editor/ (copied from MicroWriter, see NOTICE.md) build/generated artifacts
 editor/lib/EpdFont/fontsrc
 editor/lib/EpdFont/scripts/downloaded_fonts/
