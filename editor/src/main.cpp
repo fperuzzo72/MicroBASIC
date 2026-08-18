@@ -144,6 +144,54 @@ static void detectOtaApps() {
   DBG_PRINTF("[OTA] Detected %d additional app(s)\n", otaAppCount);
 }
 
+// ota_boot::switchTo() always marks the newly-selected slot's otadata state
+// as "new" (pending verify) — correct for a genuine firmware self-update
+// (fresh, untested code, where the bootloader's rollback safety net should
+// apply), but wrong for a plain dual-boot switch: we only ever point at an
+// *already-flashed, previously-working* sibling slot, never at new code.
+// Left as "new", the very next reset before the app confirms itself
+// (neither this editor nor any reader calls
+// esp_ota_mark_app_valid_cancel_rollback()) gets silently rolled back by
+// the bootloader to the other slot — observed as waking from sleep back
+// into the reader even though the editor was active when it went to sleep.
+// This finds the entry switchTo() just wrote (highest seq) and flips just
+// its state to valid, leaving switchTo() itself untouched — so a reader's
+// own genuine self-update (which reuses the exact same function) still
+// gets full rollback protection. Ported from MicroWriter's own fix
+// (commit 27b2f65) -- see docs/DEVELOPMENT_LOG.md.
+static void confirmLastOtaSwitch() {
+  const esp_partition_t* otadata =
+      esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, nullptr);
+  if (!otadata) return;
+  constexpr size_t kSectorSize = 0x1000;
+  if (otadata->size < 2 * kSectorSize) return;
+
+  ota_boot::SelectEntry slots[2] = {};
+  if (esp_partition_read(otadata, 0, &slots[0], sizeof(ota_boot::SelectEntry)) != ESP_OK ||
+      esp_partition_read(otadata, kSectorSize, &slots[1], sizeof(ota_boot::SelectEntry)) != ESP_OK) {
+    return;
+  }
+
+  int newestIdx = -1;
+  uint32_t newestSeq = 0;
+  for (int i = 0; i < 2; ++i) {
+    if (slots[i].ota_seq == 0xFFFFFFFFu) continue;
+    if (slots[i].crc != ota_boot::computeSeqCrc(slots[i].ota_seq)) continue;
+    if (newestIdx < 0 || slots[i].ota_seq > newestSeq) {
+      newestIdx = i;
+      newestSeq = slots[i].ota_seq;
+    }
+  }
+  if (newestIdx < 0) return;
+
+  constexpr uint32_t kOtaImgValid = 2;  // ESP_OTA_IMG_VALID
+  slots[newestIdx].ota_state = kOtaImgValid;
+
+  const size_t off = static_cast<size_t>(newestIdx) * kSectorSize;
+  if (esp_partition_erase_range(otadata, off, kSectorSize) != ESP_OK) return;
+  esp_partition_write(otadata, off, &slots[newestIdx], sizeof(slots[newestIdx]));
+}
+
 // Switch to another OTA app by index into otaApps[]. Non-static so input_handler can call it.
 void switchToOtaApp(int index) {
   if (index < 0 || index >= otaAppCount) return;
@@ -164,6 +212,7 @@ void switchToOtaApp(int index) {
     DBG_PRINTF("[OTA] switchTo failed, staying on current app\n");
     return;
   }
+  confirmLastOtaSwitch();
   esp_restart();
 }
 
@@ -241,7 +290,7 @@ void screenEditorFlushDisplay() {
 
 void setup() {
   DBG_INIT();
-  DBG_PRINTLN("MicroSlate starting...");
+  DBG_PRINTLN("MicroBASIC starting...");
 
   setCpuFrequencyMhz(80);
 
@@ -266,10 +315,14 @@ void setup() {
   inputSetup();
   fileManagerSetup();
 
+  // Migrate the settings/backup dir before anything reads or writes it
+  // (BLE pairing, WiFi credentials, UI prefs below all live under it).
+  ensureSettingsDir();
+
   // Restore UI prefs from SD backup if NVS was wiped by a firmware flash
   if (!uiPrefs.isKey("orient")) {
     static char uiBuf[128];
-    if (sdReadFile("/microslate/ui_prefs.json", uiBuf, sizeof(uiBuf))) {
+    if (sdReadFile("/MicroBASIC/ui_prefs.json", uiBuf, sizeof(uiBuf))) {
       int o  = jsonGetInt(uiBuf, "orient");
       int d  = jsonGetInt(uiBuf, "dark");
       int wm = jsonGetInt(uiBuf, "writeMode");
@@ -311,16 +364,16 @@ void setup() {
   autoReconnectEnabled = true;
 
   // Register this app's name in shared NVS and detect other OTA apps. The
-  // dual-boot sibling (CPR-vCodex, the reader) shows this name in its
-  // "MicroSlate" shortcut menu entry — this firmware is credited as
-  // MicroSlate in NOTICE.md, but the product name is "MicroWriter", used
-  // without the "X4" hardware suffix so this identifier (like the mDNS
-  // hostname below) stays correct if this codebase is ever ported to a
-  // different device.
-  registerOtaAppName("MicroWriter");
+  // dual-boot sibling (CPR-vCodex, the reader) shows this name in its own
+  // switcher menu entry — this firmware is built on MicroWriter (itself
+  // credited to MicroSlate in NOTICE.md), but the product name here is
+  // "MicroBASIC", used without an "X4" hardware suffix so this identifier
+  // (like the mDNS hostname below) stays correct if this codebase is ever
+  // ported to a different device.
+  registerOtaAppName("MicroBASIC");
   detectOtaApps();
 
-  DBG_PRINTLN("MicroSlate ready.");
+  DBG_PRINTLN("MicroBASIC ready.");
 
   // The display needs one FULL_REFRESH after power-on to initialize its analog
   // circuits before FAST_REFRESH will work.
@@ -709,8 +762,8 @@ void renderSleepScreen() {
   int sw = renderer.getScreenWidth();
   int sh = renderer.getScreenHeight();
   
-  // Title: "MicroSlate"
-  const char* title = "MicroSlate";
+  // Title: "MicroBASIC"
+  const char* title = "MicroBASIC";
   int titleWidth = renderer.getTextAdvanceX(FONT_BODY, title);
   int titleX = (sw - titleWidth) / 2;
   int titleY = sh * 0.35; // 35% down the screen (moved up)
@@ -837,8 +890,8 @@ void loop() {
              "{\"orient\":%d,\"dark\":%d,\"writeMode\":%d,\"fontSize\":%d,\"showWC\":%d}",
              (int)currentOrientation, darkMode ? 1 : 0,
              (int)writingMode, (int)fontSize, showWordCount ? 1 : 0);
-    if (!SdMan.exists("/microslate")) SdMan.mkdir("/microslate");
-    sdWriteFile("/microslate/ui_prefs.json", uiBuf);
+    ensureSettingsDir();
+    sdWriteFile("/MicroBASIC/ui_prefs.json", uiBuf);
   }
 
   // Check for idle timeout (skip while WiFi sync is active)

@@ -218,7 +218,7 @@ void drawMainMenu(GfxRenderer& renderer, HalGPIO& gpio) {
   if (darkMode) clippedFillRect(renderer, 0, 0, sw, sh, true);
 
   // Title
-  renderer.drawCenteredText(FONT_BODY, 30, "MicroSlate", tc, EpdFontFamily::BOLD);
+  renderer.drawCenteredText(FONT_BODY, 30, "MicroBASIC", tc, EpdFontFamily::BOLD);
 
   // Menu items (base + dynamically detected OTA apps)
   // "MicroBASIC" (the SCREEN 0-3 terminal) leads the list -- it's the

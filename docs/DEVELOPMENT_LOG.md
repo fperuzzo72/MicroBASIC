@@ -1248,3 +1248,111 @@ same function). See MicroWriter's `editor/src/main.cpp` (search
 it's self-contained (just `esp_partition.h` + the `ota_boot::SelectEntry`
 struct already visible via `OtaBootSwitch.h`), no other MicroWriter-only
 dependencies, so this one *can* be ported close to verbatim.
+
+## Second physical device: full backup, and a genuinely new phantom-RIGHT clue
+
+Connected a *second* physical X4 the next morning specifically to test
+whether the phantom-RIGHT issue is this-unit-specific or general. Before
+touching anything on it: a full 16MB `esptool read_flash` to
+`~/Downloads/X4_backups/X4_device2_fullflash_<timestamp>.bin`, verified
+by checking the ESP32 image magic byte (`0xE9`) at offset 0 (bootloader),
+`0x10000` (app0/CrossPoint), and `0x650000` (app1/MicroSlate) — all
+present, full 16,777,216-byte file. This single dump is sufficient to
+restore the device to its exact prior state, or extract either app image
+individually later (their offsets are fixed by `partitions.csv`, no
+separate per-partition dump needed).
+
+This second device is running CrossPoint + an *older* MicroSlate build —
+already past the original US-International dead-key work, but before
+this session's own visual fixes to it (the menu selection bar eating
+into the row below, cosmetic). Confirmed the phantom-RIGHT bug reproduces
+on it too, immediately, on first entry into the Home menu after
+switching from CrossPoint — with buttons "inverted" on this unit
+specifically (RIGHT moves the menu selection *up*, not down; not yet
+understood, possibly board-revision or wiring-specific, separate from
+the phantom-press question itself).
+
+**New, sharper clue from this device: the bug reproduces on a cold OTA
+switch (CrossPoint → MicroSlate) but *not* on sleep/wake.** Put the
+device to sleep while in MicroSlate, woke it — resumed correctly in
+MicroSlate, no phantom press, not at the menu and not later in the
+editor either. Both paths are full CPU resets that re-run the bootloader
+and re-execute `InputManager::begin()`'s ADC configuration from
+scratch, so *why* one shows the bug and the other doesn't is a real,
+narrow question — not yet answered, but it rules out "just needs to run
+for a few seconds to settle" (sleep/wake is instant-on and clean) and
+points at something specific to the OTA-switch/warm-`esp_restart()`
+path instead of general ADC noise. Worth checking next: whether a soft
+`esp_restart()` leaves analog/RTC peripheral state configured by the
+*previous* app (CrossPoint) in a way a true power-on-equivalent reset
+(which is what deep-sleep wake amounts to) wouldn't -- i.e. whether
+`InputManager::begin()`'s `adc1_config_channel_atten()` calls are
+sufficient on their own to fully reclaim the channel after CrossPoint's
+own ADC/GPIO usage, or need an explicit reset of the ADC unit first.
+
+**Tested pure upstream too.** Cloned `Josh-writes/microslate-firmware`
+fresh (no local checkout existed yet), built its `main` HEAD (two commits
+ahead of the `v2.0.3` tag, both doc-only deletions -- functionally
+identical to the tag), and slot-flashed it to this device's `app1`
+(`0x650000`), CrossPoint untouched at `app0`. Same partition table
+(`partitions.csv` is byte-identical in intent: `app0`/`app1` at the same
+offsets/sizes) so this dropped in cleanly. Confirms the phantom-RIGHT
+question can be asked against the *actual* original codebase, not a
+fork's approximation of it — result of that specific test not in yet
+(device still mid-comparison as of this entry).
+
+## Ported MicroWriter's `confirmLastOtaSwitch()` fix
+
+Implemented the port flagged as pending above. `main.cpp`'s
+`switchToOtaApp()` now calls `confirmLastOtaSwitch()` right after a
+successful `ota_boot::switchTo()`, before `esp_restart()` — copied close
+to verbatim from MicroWriter's `27b2f65`, using the same
+`ota_boot::SelectEntry`/`computeSeqCrc()` already available here via the
+identical `OtaBootSwitch.h`. Builds clean. Not yet flashed/retested on
+hardware — the user wants to test separately whether this changes the
+phantom-RIGHT-on-cold-switch behavior from the section above, so this is
+landed as a code change now, verification is a follow-up.
+
+## Branding and SD-folder cleanup: MicroBASIC never got MicroWriter's own rename pass
+
+MicroWriter fixed its last "MicroSlate" UI-string leaks and moved its SD
+settings folder from `/microslate` to `/microwriter` in `c0d6977` — but
+that commit landed *after* MicroBASIC had already forked off, so none of
+it carried over here. Applied the equivalent here, adapted for
+MicroBASIC's own identity (not just re-copying MicroWriter's strings):
+
+- **UI strings**: Home screen title, sleep screen title, the two
+  `DBG_PRINTLN` boot messages, and the BLE-advertised device name
+  (`NimBLEDevice::init(...)`, what a keyboard shows while pairing) all
+  now say "MicroBASIC" instead of "MicroSlate". The OTA-registered
+  sibling identity (`registerOtaAppName(...)`, what a reader's own
+  switcher menu shows for this slot) changed from `"MicroWriter"` to
+  `"MicroBASIC"` too — this project's own product identity, not
+  MicroWriter's. mDNS hostname: `microwriter.local` → `microbasic.local`.
+- **SD settings folder**: `/microslate` → **`/MicroBASIC`**, deliberately
+  *not* `/microwriter` — the user wants MicroWriter and MicroBASIC able
+  to coexist on the same SD card without their settings colliding, even
+  though MicroBASIC's `editor/` is a superset of MicroWriter's and
+  running both would be redundant in practice. `/MicroBASIC` already
+  existed as a directory for a different reason (`program_store.h`'s
+  `/MicroBASIC/programs/`), which broke MicroWriter's own migration
+  pattern: a straight "does the new folder already exist? then skip
+  migration" check would silently skip migrating old `/microslate`
+  settings the first time anyone had already saved a BASIC program.
+  `sd_backup.h`'s `ensureSettingsDir()` migrates the three known settings
+  files (`ble_kb.json`, `wifi.json`, `ui_prefs.json`) individually
+  instead of renaming the whole directory, leaving `programs/` (and
+  anything else already under `/MicroBASIC`) untouched. Called once at
+  boot (`main.cpp`, right after `fileManagerSetup()`, before anything
+  reads/writes settings) and reused at each of the three write sites
+  instead of each doing its own ad-hoc `exists`+`mkdir`.
+
+Left alone, matching MicroWriter's own precedent: the `NOTICE.md`
+attribution, `dead_keys.h`'s credit-to-MicroSlate comment, and the
+historical/dev-log-style comments elsewhere in this file and in code
+that reference "MicroSlate" or "MicroWriter" as the base codebase's own
+name — those describe lineage, not user-facing strings, and stay as-is.
+
+Builds clean. Not yet flashed to either physical device — landed as a
+code change alongside the OTA-switch fix above, both pending the user's
+next hardware test pass.

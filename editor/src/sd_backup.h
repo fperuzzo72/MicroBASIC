@@ -1,6 +1,45 @@
 #pragma once
 #include <SDCardManager.h>
+#include <cstdio>
 #include <cstring>
+
+// --- Settings/backup directory ---------------------------------------
+// MicroBASIC's own SD folder ("/MicroBASIC") doubles as both the settings
+// dir (BLE pairing, WiFi credentials, UI prefs) and the programs dir
+// (/MicroBASIC/programs, see program_store.h) -- deliberately its own
+// name, distinct from MicroWriter's own "/microwriter", so both firmwares
+// can share one SD card without their settings colliding, even though
+// MicroBASIC's editor/ is a superset of MicroWriter's (see
+// docs/DEVELOPMENT_LOG.md). Was "/microslate" before this project ever
+// forked from MicroWriter -- MicroWriter renamed its own copy of this to
+// "/microwriter" (commit c0d6977) but that fix predates the fork point
+// here, so this project still needs its own migration off the original
+// "/microslate" name, straight to "/MicroBASIC" rather than through
+// "/microwriter" as an intermediate step.
+static constexpr char SETTINGS_DIR[] = "/MicroBASIC";
+static constexpr char SETTINGS_DIR_LEGACY[] = "/microslate";
+
+// Call once at boot, before anything reads/writes BLE pairing / WiFi
+// credentials / UI prefs. Unlike MicroWriter's version of this idea, this
+// can't just rename the whole legacy directory onto the new one --
+// SETTINGS_DIR may already exist for an unrelated reason (BASIC programs
+// live under it too) -- so this migrates the known settings files
+// individually instead, leaving programs/ (and anything else already
+// under SETTINGS_DIR) untouched.
+static inline void ensureSettingsDir() {
+    if (!SdMan.exists(SETTINGS_DIR)) SdMan.mkdir(SETTINGS_DIR);
+    if (!SdMan.exists(SETTINGS_DIR_LEGACY)) return;
+    static const char* kLegacyFiles[] = {"ble_kb.json", "wifi.json", "ui_prefs.json"};
+    char oldPath[64];
+    char newPath[64];
+    for (const char* name : kLegacyFiles) {
+        snprintf(oldPath, sizeof(oldPath), "%s/%s", SETTINGS_DIR_LEGACY, name);
+        snprintf(newPath, sizeof(newPath), "%s/%s", SETTINGS_DIR, name);
+        if (SdMan.exists(oldPath) && !SdMan.exists(newPath)) {
+            SdMan.rename(oldPath, newPath);
+        }
+    }
+}
 
 // Read entire file into buf. Returns false if missing or too large.
 static inline bool sdReadFile(const char* path, char* buf, size_t bufSize) {
