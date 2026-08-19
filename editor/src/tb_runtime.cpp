@@ -65,6 +65,10 @@ static FsFile rootDir;    // directory walk
 static FsFile rootEntry;  // current entry in that walk
 static char rootNameBuf[MAX_FILENAME_LEN];
 
+// Set whenever something reaches the terminal; read by byield() so an
+// unchanged screen isn't refreshed. Defined next to byield().
+static bool termDirty;
+
 // ---------------------------------------------------------------------------
 // Console I/O -> the SCREEN 0-3 terminal
 // ---------------------------------------------------------------------------
@@ -87,6 +91,7 @@ void outch(char c) {
     return;
   }
   if (od != OSERIAL) return;  // printer, wire, radio, MQTT: nothing attached
+  termDirty = true;
 
   if (c == '\r') return;  // terminal treats '\n' alone as end of line
   if (c == '\n') {
@@ -184,15 +189,39 @@ uint8_t serialstat(uint8_t c) { return c == 0 ? 1 : 0; }
 // The repaint is throttled by wall-clock time rather than statement count: a
 // tight loop must not try to redraw faster than the e-ink panel can refresh
 // (~640ms), regardless of how many statements it gets through in between.
+// Milliseconds of *running* between screen refreshes. An e-ink FAST_REFRESH
+// costs roughly 700ms and blocks, so this is a duty cycle, not a frame rate:
+// at 400 the program gets about a third of the time and output still appears
+// in useful chunks.
+static constexpr unsigned long FLUSH_INTERVAL_MS = 400;
+
+// Statements between scheduler yields. One yield per statement (what this
+// used to do) caps execution at the tick rate -- 1000Hz here, so ~1000
+// statements/second no matter how trivial they are. The watchdog only needs
+// feeding every few seconds, and 16 statements is microseconds of compute, so
+// this costs nothing in responsiveness and lifts the ceiling considerably.
+static constexpr unsigned int YIELD_EVERY = 16;
+
 void byield() {
-  vTaskDelay(1);
+  static unsigned int sinceYield = 0;
+  if (++sinceYield >= YIELD_EVERY) {
+    sinceYield = 0;
+    vTaskDelay(1);
+  }
+
+  if (!termDirty) return;
 
   static unsigned long lastFlush = 0;
-  const unsigned long now = millis();
-  if (now - lastFlush >= 500) {
-    lastFlush = now;
-    screenEditorFlushDisplay();
-  }
+  if (millis() - lastFlush < FLUSH_INTERVAL_MS) return;
+
+  termDirty = false;
+  screenEditorFlushDisplay();
+  // Timed from when the refresh *finished*, not when it started. Marking it
+  // beforehand measured start-to-start, and since a refresh takes longer than
+  // the interval, every byield() after one immediately qualified for the next
+  // -- refreshing back to back with almost no execution in between, which is
+  // what made a print/goto loop take seconds per line.
+  lastFlush = millis();
 }
 
 void bdelay(uint32_t t) {

@@ -1913,3 +1913,42 @@ from the dead ends.
   CRLF (one extra byte per line), possibly a trailing blank line, and whatever
   spacing was typed. The saved form being smaller and consistent is the point;
   it round-trips identically from then on.
+
+## Round four: output speed, EXIT, and the boot line
+
+- **`EXIT` as an alias for `MENU`.** Both names now leave the screen editor.
+  A machine with exactly one way out should answer to whichever word the
+  user reaches for.
+- **Boot identification line.** `tbSetup()` prints
+  `MicroBASIC v0.3 for XTeink X4` before calling `basicSetup()`, so it lands
+  above the interpreter's own multi-line greeting: whose computer it is
+  first, which BASIC second -- the order those machines actually used.
+- **Screen output was crawling** (several seconds per printed line from a
+  `PRINT`/`GOTO` loop). This was a bug of ours, not the interpreter's, and
+  worth writing down because the shape of it is easy to repeat.
+
+  `byield()` throttled the e-ink flush by wall clock:
+
+      if (millis() - lastFlush < FLUSH_INTERVAL_MS) return;
+      lastFlush = millis();
+      screenEditorFlushDisplay();
+
+  The timestamp was taken *before* a call that blocks for ~700ms. So the
+  interval was being measured from the start of one refresh to the start of
+  the next, and since the refresh itself outlasts the interval, the very
+  first `byield()` after a refresh returned already qualified for another
+  one. Effectively: refresh, run one statement, refresh, run one statement.
+  The display was busy essentially all the time and the program advanced at
+  the speed of the panel.
+
+  Two changes. `lastFlush = millis()` now runs *after* the refresh, so the
+  interval means what it reads as -- idle time between refreshes. And a
+  `termDirty` flag, set in `outch()` and cleared on flush, means a program
+  that computes without printing pays nothing: no refresh is scheduled for a
+  screen that hasn't changed. `FLUSH_INTERVAL_MS` is 400, so the panel now
+  spends roughly a third of its time refreshing rather than all of it.
+
+  The yield itself is separate and unthrottled by time: every 16th
+  `byield()` does a `vTaskDelay(1)`, which is what keeps the watchdog fed.
+  Tying the yield to the flush interval was the other tempting shape here,
+  and it would have reintroduced the freeze the flush is unrelated to.

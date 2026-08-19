@@ -469,7 +469,7 @@ static void startFilesCommand() {
 //   anything else -> executed immediately in direct mode
 //
 // Only three things are intercepted, and only because they are this device's
-// and not the language's: MENU (leave the screen editor), VC (the program
+// and not the language's: MENU/EXIT (leave the screen editor), VC (the program
 // picker) and SCREEN (the display modes). Everything the interpreter already
 // implements is deliberately left to it -- routing it here instead would mean
 // reimplementing, and diverging from, behaviour that is already correct.
@@ -497,7 +497,9 @@ static void executeLogicalLine(const char* line) {
     return arg;  // may point at '\0' if no argument was given
   };
 
-  if (isWord("MENU")) {
+  // EXIT is an alias, not a second command: on a machine with one way out of
+  // the interpreter, both names should reach it.
+  if (isWord("MENU") || isWord("EXIT")) {
     screenEditorClearLogicalLine();
     applyOrientationToRenderer(currentOrientation);
     currentState = UIState::MAIN_MENU;

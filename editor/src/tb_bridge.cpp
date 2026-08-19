@@ -13,6 +13,10 @@ static bool ready = false;
 
 void tbSetup() {
   if (ready) return;
+  // Printed before basicSetup() so it lands above the interpreter's own
+  // multi-line banner, giving the boot screen the shape a 1980s machine had:
+  // whose computer it is first, which BASIC second.
+  screenEditorTermPrintLine("MicroBASIC v0.3 for XTeink X4");
   basicSetup();
   ready = true;
 }

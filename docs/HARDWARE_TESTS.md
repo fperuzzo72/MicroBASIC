@@ -168,7 +168,21 @@ RAM is at ~55%, flash at ~27.5% (down from 31.7% once My-Basic's code left the
 binary). BLE needs a 20KB contiguous allocation at connect time, so RAM is the
 number to keep watching.
 
-## 7. Regression check
+## 7. Round four: output speed, EXIT, boot line
+
+- [ ] A `PRINT`/`GOTO` loop now prints at a usable speed -- output arrives in
+      batches roughly every 0.4s plus one refresh, not one line every few
+      seconds. This was our own throttle bug (see DEVELOPMENT_LOG.md); the
+      remaining floor is the panel's ~700ms refresh, which no software change
+      removes.
+- [ ] A loop that computes without printing (e.g. `FOR I=1 TO 5000: NEXT`)
+      no longer refreshes the display at all while it runs.
+- [ ] `EXIT` leaves the screen editor exactly as `MENU` does.
+- [ ] The boot screen shows `MicroBASIC v0.3 for XTeink X4` above the
+      interpreter's greeting.
+- [ ] Ctrl+C / Esc still break a running loop (the yield path changed).
+
+## 8. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).
