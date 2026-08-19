@@ -21,7 +21,12 @@ void tbSetup() {
   // multi-line banner, giving the boot screen the shape a 1980s machine had:
   // whose computer it is first, which BASIC second.
   screenEditorTermPrintLine("FSP MicroBASIC v0.3 for XTeink X4");
+  // basicSetup() probes for an autoexec.bas -- `if (ifileopen(...))`, where
+  // failing is the ordinary case. Without this, every boot without one
+  // printed a two-line file-failure report above the interpreter's banner.
+  tbRuntimeSetQuiet(true);
   basicSetup();
+  tbRuntimeSetQuiet(false);
   ready = true;
 }
 

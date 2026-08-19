@@ -33,3 +33,8 @@ bool tbExecuteLine(const char* line);
 // whatever a program printed last, which on a game repainting cells in place
 // meant a block permanently stuck to the sprite.
 bool tbIsRunning();
+
+// Silences the runtime's file-failure reporting. The interpreter probes for
+// an autoexec.bas at startup with `if (ifileopen(...))`, so a failure there
+// is the normal case, not a fault worth announcing on the boot screen.
+void tbRuntimeSetQuiet(bool quiet);

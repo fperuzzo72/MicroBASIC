@@ -25,6 +25,7 @@
 #include "config.h"
 #include "screen_editor.h"
 #include "input_handler.h"
+#include "tb_bridge.h"
 
 #include <Arduino.h>
 #include <SDCardManager.h>
@@ -439,7 +440,12 @@ static void ensureDir() {
 // open, and a release build has no serial log to consult (-DRELEASE_BUILD
 // compiles every DBG_PRINTF out). So the failure says which, on the screen,
 // where the person who hit it is already looking.
+static bool quietFileFailures = false;
+
+void tbRuntimeSetQuiet(bool quiet) { quietFileFailures = quiet; }
+
 static void reportFileFailure(const char* what, const char* path) {
+  if (quietFileFailures) return;
   char msg[80];
   snprintf(msg, sizeof(msg), "?%s %s", what, path);
   screenEditorTermPrintLine(msg);

@@ -2664,3 +2664,29 @@ Três coisas que este caso deixou registradas, além da correção:
   resposta.
 
 Também aqui: timeout de sleep de 5 para 15 minutos.
+
+## O diagnóstico de arquivo estava gritando num caminho normal
+
+Aparecendo no boot, acima do banner do interpretador:
+
+    ?LOAD /MicroBASIC/programs/autoexec.bas
+    ?card=1 dir=1
+
+Ruído meu. O relatório de falha de arquivo foi acrescentado para caçar o
+"File Error" do SAVE, e disparava também no arranque — porque o interpretador
+procura um `autoexec.bas` com
+
+    if (ifileopen("autoexec.bas")) { xload(...); st = SRUN; }
+
+ou seja, **falhar ali é o caso normal**, não um defeito. Silenciado durante o
+`basicSetup()` e religado logo depois, então um SAVE ou LOAD de verdade
+continua explicando o que deu errado.
+
+### E de brinde: existe autoexec
+
+O trecho acima é uma funcionalidade que ninguém tinha notado que temos. Um
+arquivo chamado `autoexec.bas` em `/MicroBASIC/programs` é carregado **e
+executado** no boot (`st = SRUN`). É exatamente o que as máquinas da época
+faziam, e transforma o aparelho em algo que liga já rodando um programa.
+Nada precisou ser escrito para isso funcionar — só parar de reclamar da
+ausência dele.
