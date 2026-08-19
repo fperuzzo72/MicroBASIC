@@ -1666,3 +1666,107 @@ The switchover itself. In rough order:
   library once nothing references them.
 - Reclaim RAM: dropping My-Basic and `PROGRAM_TEXT_BUFFER_SIZE`'s three 4KB
   buffers should more than pay for the interpreter's 16KB `MEMSIZE`.
+
+
+## Switchover done: the interpreter owns the program
+
+Handed program storage and every classic command to TinyBasic. My-Basic is out
+of the binary entirely (flash 31.7% -> 27.5%).
+
+The question that prompted this: *why was My-Basic still there, if the program
+was already in TinyBasic's structure?* It wasn't -- and that was the whole
+answer. Numbered lines were still being intercepted and routed to
+`program_store`, so TinyBasic's own program memory sat empty and `RUN` had to
+stay with My-Basic because My-Basic was the only thing that could execute what
+was in our store. The staging was deliberate (`LIST`/`SAVE`/`LOAD`/`VC` are all
+built on `program_store`, so they move as a package or not at all) but it was
+half a bridge.
+
+Checked what the interpreter actually provides before deciding what to keep:
+its keyword table has `LIST`, `RUN`, `NEW`, `SAVE`, `LOAD`, `CLS`, `CONT`,
+`STOP`, `DELETE`, `CATALOG`, `DATA`/`READ`/`RESTORE`, `DEF FN`, `ON`,
+`LEFT`/`RIGHT`/`MID`, `EDIT`, `HELP` and more. So `executeLogicalLine()` now
+intercepts exactly three things -- `MENU`, `VC` and `SCREEN` -- because those
+are this device's rather than the language's, and everything else goes to the
+interpreter.
+
+Two things fell out nicely:
+
+- **`CLS` needs no interception.** Its implementation is literally
+  `outch(12)`, so handling form feed in the runtime's `outch()` was enough.
+- **Break and repaint got simpler than under My-Basic.** The interpreter polls
+  `checkch()` after *every* statement and treats `BREAKCHAR` as stop, and calls
+  `byield()` in the same place. So Escape/Ctrl+C hangs off `checkch()` and the
+  throttled display flush off `byield()` -- no stepped-handler workaround.
+
+`vc_browser` had to change with it: it was still loading through
+`screenEditorLoadProgram()` into the now-unused store, which would have left
+`RUN`/`LIST` looking at an empty program. It issues `LOAD "name"` to the
+interpreter instead.
+
+## The type mismatch that turned every line number into 0
+
+First hardware test of the switchover: program entry worked, but `LIST` showed
+every line starting with `0`, and `RUN` failed with `0: Unknown Line Error`
+because `GOTO 10` had no line 10 to find. The user's read was that the first
+character of each line number was being eaten, in storage and not just in the
+listing.
+
+Reproduced it on the host rather than guessing: built a REPL harness around the
+patched `basic.c` plus upstream's POSIX runtime, driving it with the exact
+sequence `tb_bridge.cpp` uses. Same symptom immediately -- and the harness could
+print the interpreter's state, which showed `token == NUMBER` (correct) but
+`x == 1.09262e+09` instead of 10.
+
+That number is the tell: 1092616192 is `0x41200000`, the IEEE-754 bit pattern of
+the float `10.0`. So `x` held a float and was being *read as an integer*.
+
+Root cause: `basic.h` picks the numeric type from a feature macro --
+
+    #ifdef HASFLOAT
+    typedef float number_t;
+    #else
+    typedef int   number_t;
+
+-- and `HASFLOAT` is defined in `language.h`. `basic.c` includes `language.h`
+before `basic.h`; `tb_bridge.cpp` and `tb_runtime.cpp` did not include it at
+all. So the interpreter compiled with `number_t = float` while our side saw
+`number_t = int`, for the same global. It compiles clean, links clean, and then
+`ax = x` reads the float's bits as an integer: 1092616192, truncated to a
+uint16 line number, is exactly 0. Both `10` and `20` landed on 0 -- which is why
+it looked like a digit had been eaten rather than the number being destroyed.
+
+Fixed by adding `editor/src/tb_interp.h`: one place that includes the
+interpreter's headers, in `basic.c`'s exact order, and declares its globals
+once. Nothing else includes them directly. The header carries the explanation,
+because the failure mode gives no compiler help at all.
+
+Also fixed alongside: a blank line after every entry, because
+`executeLogicalLine()` advanced the terminal unconditionally after running a
+line -- but storing a numbered line prints nothing, and `PRINT` ends with its
+own newline. Now it only advances if the cursor was left mid-row.
+
+## Dialect notes from testing
+
+- `LIST` takes `LIST b,e` for a range. `LIST n` lists **only** line n, unlike
+  the previous implementation where `LIST 30` meant "from 30 onwards".
+- `PRINT "x"` breaks the line; `PRINT "x";` does not. Classic behaviour, but
+  worth stating since the expectation was that consecutive prints would run
+  together by default.
+- `LEFT$`/`MID$`/`RIGHT$` only accept string *variables*, not literals --
+  `A$="teste": PRINT LEFT$(A$,3)` gives `tes`, `PRINT LEFT$("teste",3)` gives
+  `Args Error`. This is inherent to the interpreter's in-place string design
+  (its own docs note MS-BASIC compatibility is limited for exactly this
+  reason): those functions return a reference into a variable, and a temporary
+  literal gives them nothing to point into. `LEN`/`ASC`/`CHR$` take literals.
+- Variables persist across direct-mode statements, as expected.
+
+## The host REPL harness
+
+Worth keeping: `basic.c` compiles unmodified on the host against upstream's
+POSIX runtime, so the interpreter can be driven from a `main()` that replicates
+`tb_bridge.cpp` exactly. That is how both the line-number bug and the `LEFT$`
+limitation were diagnosed -- in seconds, with full visibility of interpreter
+state, instead of build/flash/observe cycles on the device. Given how much of
+this project's time has gone into hardware debugging loops, anything answerable
+this way should be.

@@ -105,18 +105,53 @@ test is the device side actually serving the new collection parameter.
 - [ ] Upload something too large on each tab — expect a clear size error,
       not a truncated file.
 
-## 6. TinyBasic interpreter — *nothing to test yet*
+## 6. TinyBasic interpreter — live
 
-The patch set is in place and the interpreter compiles and links, but nothing
-calls it: `mb_bridge.cpp` (My-Basic) is still what runs behind the screen
-editor, and the firmware on the device is unaffected by it. **No hardware test
-applies until the switchover happens.**
+My-Basic is gone from the binary. The interpreter now owns program storage and
+every classic command; only `MENU`, `VC` and `SCREEN` are still the firmware's.
 
-The one thing worth knowing now: when it is switched over, RAM goes from ~51%
-to ~59% (the interpreter's 16KB `MEMSIZE` plus its statics). That should come
-back down once My-Basic and the three 4KB whole-program text buffers go away,
-but it's the number to watch — BLE needs a 20KB contiguous allocation at
-connect time, and we've been on the wrong side of that once already.
+Confirmed working on hardware already: program entry, `LIST` with correct line
+numbers, `RUN`, Ctrl+C to break, variables persisting between direct-mode
+statements (`A=5` then `PRINT A+B`), `CLS` clearing the screen.
+
+Still to check:
+
+- [ ] `CLS` leaves the cursor on the **first** row, not the second. (Reported
+      as landing on row 2, but that test predates the blank-line fix, and the
+      interpreter provably emits nothing after the form feed — verified byte
+      for byte on the host harness. Retest.)
+- [ ] `LIST 10,60` lists that range; `LIST 10` lists **only** line 10. Note
+      this differs from the old behaviour, where `LIST 30` meant "from 30 to
+      the end".
+- [ ] `PRINT "oi";` (trailing semicolon) glues output onto one line, while
+      `PRINT "oi"` breaks the line. Both are correct classic behaviour.
+- [ ] `SAVE "x"` / `LOAD "x"` now go through the interpreter's own commands
+      into `/MicroBASIC/programs/`. Check a program round-trips, and that the
+      file is still readable plain text on a PC.
+- [ ] `CATALOG` (and its `FILES` alias) lists that directory.
+- [ ] `NEW` empties the program; `LIST` after it shows nothing.
+- [ ] `VC` still loads correctly — it now issues `LOAD` to the interpreter
+      rather than loading into the old store.
+- [ ] `CONT` after a Ctrl+C break resumes (this interpreter has STOP/CONT,
+      which My-Basic never did).
+- [ ] Long `RUN` output still repaints as it goes (the runtime's `byield()`
+      flushes the display every 500ms).
+
+**Known limitations, not bugs:**
+
+- `LEFT$`/`MID$`/`RIGHT$` work on string *variables*, not literals:
+  `A$="teste": PRINT LEFT$(A$,3)` works, `PRINT LEFT$("teste",3)` gives
+  `Args Error`. This interpreter does in-place string operations, so those
+  functions return a reference into a variable and have nothing to point at
+  in a temporary literal. `LEN`, `ASC` and `CHR$` take literals fine.
+- `INPUT` does not work yet: it pulls characters through the runtime's
+  `inch()`, and line editing here belongs to the screen editor. Needs the
+  same "hand a finished line over" bridge that Enter already uses.
+- `LIST` no longer paginates with `MORE?` — it scrolls, as MSX did.
+
+RAM is at ~55%, flash at ~27.5% (down from 31.7% once My-Basic's code left the
+binary). BLE needs a 20KB contiguous allocation at connect time, so RAM is the
+number to keep watching.
 
 ## 7. Regression check
 

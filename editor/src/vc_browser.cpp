@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "screen_editor.h"
+#include "tb_bridge.h"
 
 #include <SDCardManager.h>
 #include <cstdio>
@@ -147,21 +148,23 @@ void vcHandleKey(uint8_t keyCode, uint8_t modifiers) {
         vcClose();
         return;
       }
-      const ProgramFileResult r = screenEditorLoadProgram(entries[selected].name);
-      if (r == ProgramFileResult::OK) {
-        // Leave a trace on the terminal we're returning to, so it's obvious
-        // afterwards which program is now in memory.
+      // Load through the interpreter rather than through our own file
+      // helper: the interpreter owns program memory now, so loading into
+      // anything else would leave RUN/LIST looking at an empty program.
+      char cmd[MAX_FILENAME_LEN + 16];
+      snprintf(cmd, sizeof(cmd), "LOAD \"%s\"", entries[selected].name);
+      screenEditorStartNewInputLine();
+      const bool ok = tbExecuteLine(cmd);
+      if (ok) {
         char msg[MAX_FILENAME_LEN + 16];
         snprintf(msg, sizeof(msg), "Loaded %s", entries[selected].name);
-        screenEditorStartNewInputLine();
         screenEditorTermPrintLine(msg);
-        screenEditorStartNewInputLine();
-        vcClose();
-      } else {
-        // Stay open on failure: the user is mid-selection and probably wants
-        // to pick something else rather than be dumped back to the terminal.
-        snprintf(statusText, sizeof(statusText), "%s", programFileResultMessage(r));
       }
+      // Either way we return to the terminal: on failure the interpreter has
+      // already printed its own error there, which is more informative than
+      // anything this picker could put in its status bar.
+      screenEditorStartNewInputLine();
+      vcClose();
       break;
     }
 

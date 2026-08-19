@@ -115,7 +115,7 @@ ProgramFileResult screenEditorLoadProgram(const char* name);  // replaces the pr
 // refresh non-blockingly on later iterations) -- but a running BASIC
 // program blocks loopTask for its whole duration inside mb_run(), so
 // nothing printed by PRINT would ever actually reach the display until
-// the program finished. mb_bridge.cpp calls this periodically (throttled
+// the program finished. The runtime's byield() calls this periodically (throttled
 // by time, not by print volume) during RUN so a loop's output is visible
 // as it goes, not just as a final frame when the program stops or is
 // broken out of. Defined in main.cpp, which owns the renderer/gpio

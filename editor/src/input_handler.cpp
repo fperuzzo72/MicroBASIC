@@ -6,7 +6,6 @@
 #include "dead_keys.h"
 #include "screen_editor.h"
 #include "program_store.h"
-#include "mb_bridge.h"
 #include "tb_bridge.h"
 #include "vc_browser.h"
 
@@ -461,32 +460,22 @@ static void startFilesCommand() {
 //     LIST/FILES/SAVE/LOAD) -- cleared from the visible terminal before
 //     running, same reasoning as the very first LOAD/SAVE/MENU pass;
 //   - anything else -> a My-Basic statement, executed immediately
-//     (mbBridgeRunDirect -- variables persist across separate direct
-//     statements, verified against the real interpreter).
+// A logical line (screenEditorGetLogicalLineText() -- may span several
+// physical rows if it wrapped while typing) goes almost entirely to the
+// interpreter, which owns program storage and the classic commands:
+//
+//   "10 PRINT X"  -> its own tokenised program memory
+//   LIST/RUN/NEW/SAVE/LOAD/CLS/CONT/DELETE/CATALOG/...  -> its own handling
+//   anything else -> executed immediately in direct mode
+//
+// Only three things are intercepted, and only because they are this device's
+// and not the language's: MENU (leave the screen editor), VC (the program
+// picker) and SCREEN (the display modes). Everything the interpreter already
+// implements is deliberately left to it -- routing it here instead would mean
+// reimplementing, and diverging from, behaviour that is already correct.
 static void executeLogicalLine(const char* line) {
   const char* p = line;
   while (*p == ' ') p++;
-
-  if (isdigit((unsigned char)*p)) {
-    char* endptr = nullptr;
-    long num = strtol(p, &endptr, 10);
-    const char* text = endptr;
-    while (*text == ' ') text++;
-    if (num < 1 || num > 65535) {
-      // Line numbers are stored as uint16 (see program_store.h's record
-      // layout); 0 is reserved as "no line" the way classic BASICs do.
-      screenEditorStartNewInputLine();
-      screenEditorTermPrintLine("?Line number out of range");
-      return;
-    }
-    if (!programStoreSet((int)num, text)) {
-      screenEditorStartNewInputLine();
-      screenEditorTermPrintLine("?Out of memory");
-      return;
-    }
-    screenEditorStartNewInputLine();
-    return;
-  }
 
   if (!*p) {
     screenEditorStartNewInputLine();
@@ -514,28 +503,6 @@ static void executeLogicalLine(const char* line) {
     currentState = UIState::MAIN_MENU;
     return;
   }
-  if (isWord("NEW")) {
-    programStoreClear();
-    screenEditorClearLogicalLine();
-    screenEditorStartNewInputLine();
-    return;
-  }
-  if (isWord("RUN")) {
-    screenEditorStartNewInputLine();
-    mbBridgeRunProgram();
-    screenEditorStartNewInputLine();
-    return;
-  }
-  if (const char* arg = wordArg("LIST")) {
-    screenEditorClearLogicalLine();
-    startListCommand(arg);
-    return;
-  }
-  if (wordArg("FILES")) {
-    screenEditorClearLogicalLine();
-    startFilesCommand();
-    return;
-  }
   if (isWord("VC")) {
     // Full-screen program picker (vc_browser.h). Clears its own command text
     // first so the terminal it returns to isn't left with "VC" on it.
@@ -543,32 +510,45 @@ static void executeLogicalLine(const char* line) {
     vcOpen();
     return;
   }
-  if (const char* arg = wordArg("SAVE")) {
-    static char nameBuf[MAX_FILENAME_LEN];
-    stripQuotes(arg, nameBuf, sizeof(nameBuf));
-    screenEditorClearLogicalLine();
-    const ProgramFileResult r = screenEditorSaveProgram(nameBuf);
-    screenEditorTermPrintLine(r == ProgramFileResult::OK ? "Saved."
-                                                         : programFileResultMessage(r));
+  if (isWord("FILES")) {
+    // Alias: the interpreter calls its directory listing CATALOG. Keeping
+    // FILES working costs one line and it's the name this project has used
+    // since before the interpreter existed.
+    screenEditorStartNewInputLine();
+    tbExecuteLine("CATALOG");
+    screenEditorStartNewInputLine();
     return;
   }
-  if (const char* arg = wordArg("LOAD")) {
-    static char nameBuf[MAX_FILENAME_LEN];
-    stripQuotes(arg, nameBuf, sizeof(nameBuf));
-    screenEditorClearLogicalLine();
-    const ProgramFileResult r = screenEditorLoadProgram(nameBuf);
-    screenEditorTermPrintLine(r == ProgramFileResult::OK ? "Loaded."
-                                                         : programFileResultMessage(r));
+  if (const char* arg = wordArg("SCREEN")) {
+    // Ours, not the language's: the interpreter has no SCREEN, and these are
+    // this project's own 32/48/64/80-column text modes (see README).
+    screenEditorStartNewInputLine();
+    if (!*arg) {
+      char msg[32];
+      snprintf(msg, sizeof(msg), "SCREEN %d", screenEditorGetMode());
+      screenEditorTermPrintLine(msg);
+    } else {
+      const int mode = atoi(arg);
+      if (mode < 0 || mode > 3) {
+        screenEditorTermPrintLine("?Bad SCREEN mode");
+      } else {
+        screenEditorSetMode(mode);
+      }
+    }
+    screenEditorStartNewInputLine();
     return;
   }
 
-  // Not one of ours -- hand the whole line to the interpreter as a direct-mode
-  // statement. This is the TinyBasic path (tb_bridge.h); numbered lines still
-  // go to program_store above, and RUN still goes through My-Basic, so the two
-  // coexist while the switchover happens one piece at a time.
+  // Everything else -- including numbered lines, LIST, RUN, SAVE, LOAD, NEW --
+  // is the interpreter's. Its own output (listings, errors, PRINT) reaches the
+  // terminal through the runtime's outch().
   screenEditorStartNewInputLine();
   tbExecuteLine(p);
-  screenEditorStartNewInputLine();
+  // Only break the line if the interpreter left the cursor mid-row. Storing a
+  // numbered line prints nothing at all, and PRINT ends with its own newline,
+  // so unconditionally advancing here left a blank row after every entry --
+  // typing "10 PRINT" then "20 GOTO 10" put an empty line between them.
+  if (screenEditorGetCursorCol() != 0) screenEditorStartNewInputLine();
 }
 
 static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {

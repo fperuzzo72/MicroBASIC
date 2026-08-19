@@ -17,10 +17,10 @@
 // they're referenced from dispatch tables compiled in regardless -- so they
 // still have to exist, they just never get called.
 //
-// STATUS: skeleton. The contract is complete and this compiles and links, but
-// it is not yet wired into the UI -- nothing calls basicSetup()/basicLoop()
-// yet, and mb_bridge.cpp (My-Basic) is still the interpreter behind the
-// SCREEN_EDITOR. See docs/DEVELOPMENT_LOG.md for the migration plan.
+// This is live: the interpreter now owns program storage and every classic
+// command (LIST/RUN/SAVE/LOAD/NEW/CLS/...). Only MENU, VC and SCREEN are still
+// handled by the firmware, being this device's rather than the language's.
+// See docs/DEVELOPMENT_LOG.md.
 
 #include "config.h"
 #include "screen_editor.h"
@@ -32,15 +32,7 @@
 #include <cstdio>
 #include <cstring>
 
-// Include order matters and is not arbitrary: runtime.h refers to constants
-// (BUFSIZE, SPIRAMSBSIZE, the device ids) that hardware.h defines, and
-// common.h has to come first. This is the same order upstream's own
-// runtime.c uses.
-extern "C" {
-#include "common.h"
-#include "hardware.h"
-#include "runtime.h"
-}
+#include "tb_interp.h"
 
 // ---------------------------------------------------------------------------
 // State the interpreter expects the runtime to own (declared extern in
@@ -75,6 +67,14 @@ void outch(char c) {
     charcount[od > 0 && od < 5 ? od : 0] = 0;
     return;
   }
+  // Form feed is how the interpreter implements CLS -- its TCLS case is
+  // literally `outch(12)`. Handling it here means CLS works without being
+  // intercepted as a special case the way it had to be under My-Basic.
+  if (c == 12) {
+    screenEditorReset();
+    for (int i = 0; i < 5; i++) charcount[i] = 0;
+    return;
+  }
   const char s[2] = {c, '\0'};
   screenEditorTermPrint(s);
   if (od >= 0 && od < 5) charcount[od]++;
@@ -84,12 +84,25 @@ void outs(char* s, uint16_t l) {
   for (uint16_t i = 0; i < l; i++) outch(s[i]);
 }
 
-// The interpreter polls for input rather than blocking, so these hand it
-// whatever the key queue has. Actual line editing (cursor keys, backspace,
-// the wrapped-logical-line model) stays in screen_editor.cpp/input_handler.cpp
-// -- consins() below is deliberately not upstream's own line editor.
+// Never reached for normal input: complete lines are injected into the
+// interpreter's buffer by tb_bridge.cpp, so nothing pulls characters through
+// here. INPUT is the one statement that would, and it does not work yet --
+// see docs/HARDWARE_TESTS.md.
 char inch() { return 0; }
-char checkch() { return 0; }
+
+// The interpreter checks this after *every* statement while a program runs,
+// and treats BREAKCHAR as "stop". That's the natural place to hook this
+// firmware's own break keys, so Escape or Ctrl+C interrupts a running program
+// without needing anything like the stepped-handler workaround My-Basic
+// required (see docs/DEVELOPMENT_LOG.md).
+//
+// Safe to repurpose because normal input never comes through here: lines are
+// injected whole into the interpreter's buffer by tb_bridge.cpp, so checkch()
+// is only ever reached on the break path.
+char checkch() {
+  return inputConsumeBreakPending() ? BREAKCHAR : 0;
+}
+
 uint16_t availch() { return 0; }
 
 // Reads one line. This is where this firmware's own screen editor has to take
@@ -131,13 +144,29 @@ uint8_t serialstat(uint8_t c) { return c == 0 ? 1 : 0; }
 // Timing and scheduling
 // ---------------------------------------------------------------------------
 
-// Yields to FreeRTOS. Not optional on this device: the interpreter runs inside
-// loopTask, so without a yield here a BASIC loop starves the idle task and
-// trips the watchdog -- exactly the freeze already hit once with My-Basic (see
-// docs/DEVELOPMENT_LOG.md). The interpreter calls byield() regularly by
-// design, which is why this integration doesn't need My-Basic's stepped-handler
-// workaround.
-void byield() { vTaskDelay(1); }
+// Called by the interpreter after every statement. Two jobs, both of which
+// My-Basic needed a bolted-on stepped handler to achieve:
+//
+// 1. Yield. The interpreter runs inside loopTask, so without this a BASIC loop
+//    starves the FreeRTOS idle task and trips the watchdog -- the exact freeze
+//    hit once already (see docs/DEVELOPMENT_LOG.md).
+// 2. Repaint. loop() can't redraw while a program is running, because the
+//    program *is* what loop() is currently doing, so PRINT output would sit
+//    invisible in the grid until the program ended.
+//
+// The repaint is throttled by wall-clock time rather than statement count: a
+// tight loop must not try to redraw faster than the e-ink panel can refresh
+// (~640ms), regardless of how many statements it gets through in between.
+void byield() {
+  vTaskDelay(1);
+
+  static unsigned long lastFlush = 0;
+  const unsigned long now = millis();
+  if (now - lastFlush >= 500) {
+    lastFlush = now;
+    screenEditorFlushDisplay();
+  }
+}
 
 void bdelay(uint32_t t) {
   if (t == 0) return;

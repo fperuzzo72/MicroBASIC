@@ -19,7 +19,6 @@
 #include "ui_renderer.h"
 #include "wifi_sync.h"
 #include "screen_editor.h"
-#include "mb_bridge.h"
 #include "tb_bridge.h"
 
 // Enum for sleep reasons
@@ -260,7 +259,7 @@ static void updateScreen() {
   }
 }
 
-// See screen_editor.h for why mb_bridge.cpp needs this: a running BASIC
+// See screen_editor.h for why the interpreter needs this: a running BASIC
 // program blocks loopTask, so PRINT output would otherwise sit in the
 // grid buffer, invisible, until the program finished or broke out.
 //
@@ -346,7 +345,6 @@ void setup() {
   // menu would, without touching the just-loaded currentOrientation.
   screenEditorReset();
   applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
-  mbBridgeSetup();
   tbSetup();  // TinyBasic: direct-mode statements (see tb_bridge.h)
 
   bleSetup();

@@ -7,31 +7,7 @@ extern bool screenDirty;
 
 #include <cstring>
 
-extern "C" {
-#include "common.h"
-#include "hardware.h"
-#include "runtime.h"
-#include "basic.h"
-
-// The interpreter's own state. These are plain globals in basic.c and are not
-// declared in basic.h, so they're declared here with the types they're defined
-// with there -- checked against basic.c, not guessed:
-//
-//   char ibuffer[BUFSIZE];  char *bi;  number_t x;  address_t ax;
-//   token_t token;  token_t er;  mem_t st;  address_t here;  mem_t form;
-//
-extern char ibuffer[];
-extern char* bi;
-extern number_t x;
-extern address_t ax;
-extern token_t token;
-extern token_t er;
-extern mem_t st;
-extern address_t here;
-extern mem_t form;
-
-void basicSetup();
-}
+#include "tb_interp.h"
 
 static bool ready = false;
 
