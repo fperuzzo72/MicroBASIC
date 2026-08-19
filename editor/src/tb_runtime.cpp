@@ -145,7 +145,19 @@ void outch(char c) {
     for (int i = 0; i < 5; i++) charcount[i] = 0;
     return;
   }
-  const char s[2] = {c, '\0'};
+  // Characters above ASCII are Latin-1, one byte each -- see pushProgramKey
+  // in input_handler.cpp for why BASIC strings hold bytes rather than UTF-8.
+  // The terminal wants UTF-8, and for this range that is two bytes.
+  const unsigned char uc = (unsigned char)c;
+  char s[3];
+  if (uc < 0x80) {
+    s[0] = (char)uc;
+    s[1] = '\0';
+  } else {
+    s[0] = (char)(0xC0 | (uc >> 6));
+    s[1] = (char)(0x80 | (uc & 0x3F));
+    s[2] = '\0';
+  }
   screenEditorTermPrint(s);
   charcount[OSERIAL]++;
 }
@@ -265,11 +277,17 @@ uint16_t consins(char* b, uint16_t nb) {
       continue;
     }
 
-    if (c < ' ' || (unsigned char)c > 126) continue;  // arrows, tabs, controls
-    if (z >= nb) continue;                            // full: keep waiting for Enter
+    // Printable ASCII, or a Latin-1 accented character (one byte, see
+    // pushProgramKey in input_handler.cpp). The C1 range 0x80-0x9F is
+    // control codes in Latin-1 and has no glyph, so it is dropped with the
+    // rest of them, along with the arrow codes 28-31.
+    const unsigned char uc = (unsigned char)c;
+    if (uc < ' ' || uc == 127 || (uc >= 0x80 && uc < 0xA0)) continue;
+    if (z >= nb) continue;  // full: keep waiting for Enter
 
     b[z++] = c;
-    screenEditorInsertCodepoint((uint32_t)(unsigned char)c);
+    // Latin-1 and Unicode agree on 0xA0-0xFF, so the byte is the codepoint.
+    screenEditorInsertCodepoint((uint32_t)uc);
     termDirty = true;
   }
 

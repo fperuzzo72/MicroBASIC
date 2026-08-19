@@ -847,6 +847,20 @@ static bool breakPending = false;
 
 static constexpr uint8_t PROG_KEYS_SIZE = (uint8_t)sizeof(progKeys);
 
+// One character into the ring. Characters are *bytes*, and an accented one
+// is a single byte in Latin-1 rather than the two UTF-8 bytes the editors
+// pass around. That is not a shortcut, it is what makes BASIC strings work:
+// they are byte arrays, so LEN("ola" with an accent) has to be 3 and MID$
+// has to index characters. Storing UTF-8 would silently break both, and
+// one byte per character is what the machines this imitates actually did.
+// tb_runtime.cpp's outch() converts back to UTF-8 on the way to the screen.
+static void pushProgramKey(char c) {
+  const uint8_t next = (uint8_t)((progHead + 1) % PROG_KEYS_SIZE);
+  if (next == progTail) return;  // full: drop the newest, see above
+  progKeys[progHead] = c;
+  progHead = next;
+}
+
 // Both inputConsumeBreakPending() and the GET path call this, because the
 // interpreter reaches them at different moments and whichever runs first has
 // to be the one that empties the hardware queue.
@@ -877,12 +891,32 @@ static void pumpProgramInput() {
         case HID_KEY_BACKSPACE: c = 8; break;
         default: continue;
       }
+      pushProgramKey(c);
+      continue;
     }
 
-    const uint8_t next = (uint8_t)((progHead + 1) % PROG_KEYS_SIZE);
-    if (next == progTail) continue;  // full: drop the newest, see above
-    progKeys[progHead] = c;
-    progHead = next;
+    // The same US-International dead key engine the editors use, so INPUT
+    // takes accents too. What comes back is UTF-8; what goes into the ring
+    // is one byte, see pushProgramKey.
+    const char* composed = deadKeyProcess(c);
+    if (composed == nullptr) {
+      pushProgramKey(c);  // not part of any composition
+      continue;
+    }
+    if (composed[0] == '\0') continue;  // dead key held, nothing typed yet
+
+    const unsigned char* u = (const unsigned char*)composed;
+    const uint32_t cp = utf8NextCodepoint(&u);
+    if (cp == 0) continue;
+    // Above Latin-1 there is no single byte to store, and BASIC strings are
+    // byte arrays. Nothing the US-International layout composes lands up
+    // here, so dropping is not a loss the user can reach.
+    if (cp <= 0xFF) pushProgramKey((char)(unsigned char)cp);
+
+    // A dead key followed by a character it can't combine with emits the
+    // accent literally and hands the character back to be typed on its own.
+    const char req = deadKeyTakeRequeue();
+    if (req != 0) pushProgramKey(req);
   }
 }
 
@@ -916,6 +950,9 @@ void inputDiscardPendingKeys() {
 void inputFlushProgramKeys() {
   progHead = progTail = 0;
   breakPending = false;
+  // A dead key held down when the last command ended is not an accent on the
+  // first character of the next one.
+  deadKeyReset();
 }
 
 int processAllInput() {

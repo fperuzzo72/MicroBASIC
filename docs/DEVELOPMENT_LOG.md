@@ -2374,3 +2374,50 @@ The guard now protecting the sync prompts -- discard queued input, ignore
 keys for 900ms after a screen appears on its own -- exists because of this,
 and is the right shape of defence for any screen a spurious press can
 answer. It is a mitigation, not a fix.
+
+## Accents in INPUT, and why BASIC strings are Latin-1
+
+`INPUT` took letters but not accents. The dead key engine was there --
+`dead_keys.h`, the same US-International machine both editors use -- but the
+program key ring was reading `hidToAscii` directly and never went through
+it, so a dead key arrived as a bare quote or tilde.
+
+Routing the ring through `deadKeyProcess()` is the fix, but it forces a
+decision the editors never had to make, because they deal in UTF-8 and the
+interpreter does not: **what is one character?**
+
+BASIC strings are byte arrays. `LEN`, `MID$`, `LEFT$` and the in-place
+substring assignment that `examples/pacman.bas` uses as a maze buffer all
+index *bytes*. If an accented character went in as its two UTF-8 bytes,
+`LEN("olá")` would be 4, `MID$(A$,3,1)` would return half a character, and
+the failure would be silent and confusing in exactly the way this project
+has already been bitten by once (the `number_t` mismatch).
+
+So the ring stores **Latin-1**: one byte per character. That is not a
+shortcut, it is what the machines this imitates actually did -- a
+single-byte character set, `ASC` and `CHR$` meaning something simple -- and
+every character the US-International layout composes (the acute, grave,
+circumflex and tilde vowels, cedilla, umlaut, ñ) is in it. Codepoints above
+0xFF are dropped; nothing the layout can produce reaches there.
+
+Three places had to agree on it:
+
+- `pushProgramKey()` converts the composed codepoint to a byte.
+- `consins()` accepts 0xA0-0xFF as text and echoes it as a codepoint --
+  Latin-1 and Unicode are identical in that range, so the byte *is* the
+  codepoint. The C1 range 0x80-0x9F is dropped with the other controls.
+- `outch()` converts back on the way out: the terminal wants UTF-8, and this
+  range is two bytes. Before this it wrote the raw byte, which is not valid
+  UTF-8 and rendered as nothing useful.
+
+One consequence worth stating rather than discovering later: a program
+`SAVE`d with accented string literals is a Latin-1 text file on the SD card,
+not UTF-8. It round-trips through `LOAD` exactly, and it is still plain text
+readable without this firmware, but a modern editor opening it will need to
+be told the encoding. The alternative -- UTF-8 on disk -- would mean either
+breaking `LEN` or transcoding on every `SAVE`/`LOAD`, and the file is
+overwhelmingly ASCII in practice.
+
+Also reset the dead key state in `inputFlushProgramKeys()`, which runs before
+each command: an accent held down when the last command ended is not an
+accent on the first character of the next one.

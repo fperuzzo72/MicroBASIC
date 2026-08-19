@@ -269,6 +269,16 @@ number to keep watching.
       below the answer.
 - [ ] A long-running program with an INPUT in a loop still repaints and
       does not trip the watchdog.
+- [ ] Accents work in INPUT: `á é í ó ú ã õ ç â ê ô à ü ñ` all type, and a
+      dead key followed by something it can't combine with (e.g. `~` then
+      `s`) emits both.
+- [ ] `10 INPUT A$` / `20 PRINT A$;" tem ";LEN(A$)` -- typing `olá` reports
+      **3**, not 4. That is the whole reason strings are Latin-1 rather than
+      UTF-8; if it says 4, the encoding is wrong somewhere.
+- [ ] `PRINT "ação"` typed at the prompt still displays correctly (outch now
+      re-encodes Latin-1 to UTF-8 on the way to the terminal).
+- [ ] `SAVE` a program with an accented string literal, `LOAD` it back, and
+      `LIST` -- the accent survives the round trip.
 
 Free A/B for the phantom RIGHT, costing nothing to try: the sync screen
 pins the CPU at 80MHz with light sleep off for as long as it is open. If
