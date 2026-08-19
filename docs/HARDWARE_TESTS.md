@@ -275,8 +275,12 @@ number to keep watching.
 - [ ] `10 INPUT A$` / `20 PRINT A$;" tem ";LEN(A$)` -- typing `olá` reports
       **3**, not 4. That is the whole reason strings are Latin-1 rather than
       UTF-8; if it says 4, the encoding is wrong somewhere.
-- [ ] `PRINT "ação"` typed at the prompt still displays correctly (outch now
-      re-encodes Latin-1 to UTF-8 on the way to the terminal).
+- [ ] `PRINT "ação"` typed at the prompt displays correctly. This is a
+      *different path* from INPUT -- the typed line used to substitute '?'
+      for every non-ASCII character before the interpreter saw it -- so it
+      needs checking separately even though INPUT works.
+- [ ] `10 PRINT "ação"` stored as a program line, then `LIST` -- the accents
+      survive being tokenised and printed back.
 - [ ] `SAVE` a program with an accented string literal, `LOAD` it back, and
       `LIST` -- the accent survives the round trip.
 

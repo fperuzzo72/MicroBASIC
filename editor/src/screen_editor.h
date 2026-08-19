@@ -52,9 +52,11 @@ void screenEditorInsertCodepoint(uint32_t cp);
 void screenEditorBackspace();
 
 // Concatenates every row from the logical-line start through the cursor's
-// row (ASCII only -- non-ASCII becomes '?'; command/line-number parsing
-// never needs more than that), trailing spaces trimmed only on the last
-// row. This is what actually gets parsed when Enter is pressed.
+// row, trailing spaces trimmed only on the last row. This is what actually
+// gets parsed when Enter is pressed, so it is BASIC source and may contain
+// accented string literals: characters come out as Latin-1 bytes, the same
+// one-byte-per-character encoding BASIC strings use throughout (anything
+// above 0xFF, which this keyboard cannot produce, becomes '?').
 void screenEditorGetLogicalLineText(char* out, int outSize);
 
 // Clears every row of the current logical line back to spaces and moves

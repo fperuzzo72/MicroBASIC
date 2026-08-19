@@ -213,7 +213,14 @@ void screenEditorGetLogicalLineText(char* out, int outSize) {
   for (int r = start; r <= end && n < outSize - 1; r++) {
     for (int c = 0; c < cols && n < outSize - 1; c++) {
       uint32_t cp = grid[r][c];
-      char ch = (cp < 0x80) ? (char)cp : '?';
+      // Latin-1, one byte per character, matching what the keyboard already
+      // puts into BASIC strings (see pushProgramKey in input_handler.cpp).
+      // This used to substitute '?' for everything above ASCII, on the
+      // reasoning that parsing a command never needed more -- true when a
+      // typed line was only ever a command, and wrong the moment it could be
+      // BASIC source: PRINT "acao" with a cedilla and a tilde reached the
+      // interpreter as a??o. Above 0xFF there is still no byte to write.
+      char ch = (cp <= 0xFF) ? (char)(unsigned char)cp : '?';
       out[n] = ch;
       if (ch != ' ') lastNonSpace = n;
       n++;

@@ -2421,3 +2421,25 @@ overwhelmingly ASCII in practice.
 Also reset the dead key state in `inputFlushProgramKeys()`, which runs before
 each command: an accent held down when the last command ended is not an
 accent on the first character of the next one.
+
+### The typed line was throwing them away first
+
+`INPUT` then took accents and `PRINT "acao"` with a cedilla still printed
+`a??o`, because they are different paths and only one had been fixed. A
+typed line reaches the interpreter through
+`screenEditorGetLogicalLineText()`, which read the grid's codepoints and
+substituted `'?'` for everything above ASCII. Its own comment explained why:
+"command/line-number parsing never needs more than that". That was true when
+a typed line was only ever a command like `LIST` or `MENU`, and stopped
+being true the moment the line could be BASIC source containing a string
+literal. The substitution happened before the interpreter ever saw the line,
+so no amount of correctness downstream could recover it.
+
+It now emits Latin-1 bytes, the same encoding as every other path.
+
+Verified on the host harness that the interpreter itself is not the problem:
+feeding it a line with raw 0xE7/0xE3 bytes inside a string literal prints
+them back unchanged and reports `LEN` of 3 for a three-character accented
+word. Nothing in the tokeniser touches bytes between quotes. So the encoding
+holds end to end -- keyboard, grid, typed line, interpreter, terminal -- and
+the only place it is visible from outside is a SAVEd file, as noted above.
