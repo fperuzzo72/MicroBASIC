@@ -2286,3 +2286,70 @@ Two changes from playing it:
   route was blocked, which was visible in the host trace. Refusing a reversal
   unless it is the only way out of a dead end costs one comparison and turns
   the pacing into a patrol.
+
+## INPUT
+
+The last statement that did not work, and the one whose absence made the
+whole thing feel like a demo rather than a BASIC. It is also the only place
+where the interpreter asks for something this integration was built to
+avoid: everywhere else the firmware hands it a finished line and it never
+waits on a key.
+
+`INPUT` calls `ins()` -> `consins()` for both its numeric and its string
+form (`ins(s.ir - 1, maxlen)` for strings -- note the `- 1`, which is the
+length byte landing in the byte before the string data). Ours has to block,
+because it is called from inside `statement()`, inside `tbExecuteLine()`,
+inside loopTask. For as long as it runs, `loop()` is not running: nothing
+else repaints the screen, feeds the watchdog, or drains the keyboard. All
+three happen inside the read loop.
+
+It is deliberately its own small line editor rather than reusing the screen
+editor's. `INPUT` reads a *value*, not a program line, and the screen
+editor's cursor movement, logical-line continuation and Enter semantics
+would let the user wander off into the rest of the terminal mid-statement.
+Characters echo as typed, backspace erases, and everything else is dropped
+-- including the arrow codes, which would otherwise be stored as text now
+that the key ring delivers them.
+
+Three details that would each have been a silent bug:
+
+- **The buffer contract.** Text at `b[1..z]`, NUL at `b[z+1]`, length in
+  `b[0]`. Copied from upstream's own POSIX `consins()` rather than inferred,
+  the same discipline that the `ibuffer` prefix in tb_bridge needed after
+  getting it wrong once.
+- **The prompt has to be flushed before blocking.** `showprompt()` has
+  already gone through `outch` when `consins()` is entered, but `byield()`
+  would sit on it for up to 400ms -- the user would be staring at a screen
+  that had not yet asked them anything.
+- **Break.** A break arriving during `INPUT` is reported through the buffer,
+  which is how the interpreter expects to hear it: `innumber()` returns -1
+  on seeing `BREAKCHAR` and `INPUT` stops the program. It is also latched,
+  so the run loop's own `checkch()` fires on the next statement -- the
+  string branch has no equivalent of `innumber`'s check and would otherwise
+  just store the character and carry on.
+
+Backspace also had to be added to the key ring (`hidToAscii` returns 0 for
+it, and it was not one of the arrow codes being mapped). A program using
+`GET` now sees 8 for it, which is correct.
+
+The interpreter side was verified on the host harness first -- prompt forms,
+`INPUT "NOME? ";A$`, bare `INPUT A`, numeric conversion -- so what remained
+to be got right on the device was only the runtime half.
+
+**Not flashed yet.** Built clean; the hardware round is deferred.
+
+## Phantom buttons: a down-bias, not just RIGHT
+
+New observation, worth recording because it changes the shape of the bug.
+It now presents as extra *downward* presses: the main menu scrolls past
+Sync down to the reader entries, and the WiFi network list has moved one
+line below the intended network by the time Enter is pressed. Earlier it
+was characterised as a phantom RIGHT.
+
+That is consistent with the ADC hypothesis rather than against it -- a
+low-biased reading on a shared resistor ladder lands in whichever band sits
+lowest, and what that band *means* depends on the screen -- but it does say
+the fault is not tied to one button. Also worth noting: the guard now
+protecting the sync prompts (discard queued input, ignore keys for 900ms
+after a screen appears on its own) exists because of exactly this, and is
+the right shape of defence for any screen a spurious press can answer.

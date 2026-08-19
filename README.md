@@ -6,8 +6,8 @@ and an MSX-style `SCREEN` command to switch between four text densities
 and a full graphics mode (`PSET`/`LINE`/`CIRCLE`) — instead of a
 note-taking app.
 
-Early implementation stage — `editor/` builds and flashes today (see
-"Status" below). This repo holds the firmware itself plus the research
+`editor/` builds and flashes today, and the BASIC is usable — see
+"Status" below. This repo holds the firmware itself plus the research
 and decisions that got it here — see
 [docs/DEVELOPMENT_LOG.md](docs/DEVELOPMENT_LOG.md) for the full narrative
 (useful for picking this project back up on a machine that doesn't have
@@ -20,24 +20,29 @@ the conversation history that produced it).
 (not a fork/submodule, not kept in sync with upstream — see `NOTICE.md`
 for exactly which commit it was copied from), now with a real BASIC
 environment wired in on top of it. The device **boots straight into
-MicroBASIC** — a scrolling character terminal (classic numbered program
-lines + a [My-Basic](https://github.com/paladin-t/my_basic) interpreter
-underneath) — with the full prose note editor still available from the
-Home menu (now first item **"MicroBASIC"**, then Browse Files, New
-Program, Settings, Sync) for anyone who wants MicroWriter's original
-note-taking instead. Physical Back always exits Screen Editor to the
-menu, the fallback for when a keyboard isn't paired yet.
+MicroBASIC** — a scrolling character terminal running
+[Stefan Lenz's IoT BASIC](https://github.com/slviajero/tinybasic) — with
+MicroWriter's prose editor still available from the Home menu. Physical
+Back always exits to the menu, the fallback for when a keyboard isn't
+paired yet.
 
-Working today: `LIST` (with `LIST 30` / `LIST 10-200` ranges, MORE?-
-paginated), `FILES` (also paginated), `RUN`, `NEW`, `LOAD`/`SAVE
-"name.bas"` (serializes the actual numbered program, not the screen
-buffer), `MENU`, `SCREEN n` and `CLS` as real BASIC statements, all four
-`SCREEN 0/1/2/3` fonts, and classic `GOTO`/`GOSUB <line number>` (My-Basic
-itself only supports alphabetic labels — this project rewrites numbered
-targets to labels at `RUN` time, transparently). `SCREEN 4` (graphics)
-doesn't exist yet. Builds clean with PlatformIO
-(`cd editor && pio run -e xteink_x4`) and has been flashed and tested on
-the actual X4 hardware throughout.
+The interpreter owns the language: program storage, `LIST`, `RUN`, `NEW`,
+`SAVE`/`LOAD`, `CLS`, `CATALOG`, `FOR`/`NEXT`, `GOSUB`, `DATA`/`READ`,
+string and numeric variables, and direct-mode execution of anything typed
+without a line number. Four things are intercepted by the firmware because
+they are the *device's* and not the language's: `MENU`/`EXIT` (leave the
+terminal), `VC` (a full-screen program picker), `SCREEN n` (the text modes
+below), and `FILES`/`DIR` (aliases for `CATALOG`).
+
+`GET`, `@A` and `@C` read the keyboard without blocking, `INPUT` reads a
+line, and `LOCATE` positions the cursor — so a program can repaint in
+place instead of scrolling. `examples/pacman.bas` exercises all of it and
+is the standing hardware test. `SCREEN 4` (graphics) doesn't exist yet.
+
+Builds clean with PlatformIO (`cd editor && pio run -e xteink_x4`) and has
+been flashed and tested on the actual X4 hardware throughout. See
+[docs/HARDWARE_TESTS.md](docs/HARDWARE_TESTS.md) for what has been checked
+on the device and what is still open.
 
 ## Plan so far
 
@@ -50,25 +55,37 @@ the actual X4 hardware throughout.
   ongoing sync with MicroWriter upstream — its own future changes aren't
   expected to be relevant to MicroBASIC's direction; anything that turns
   out useful later gets ported over deliberately instead.
-- **Interpreter**: [My-Basic](https://github.com/paladin-t/my_basic) (MIT,
-  two files, designed to be embedded/extended) as the core, vendored in
-  `editor/lib/MyBasic/` and wired in via `mb_bridge.cpp`. My-Basic's own
-  GOTO/GOSUB only understands alphabetic labels, not classic line
-  numbers (verified against the real interpreter, not assumed — see the
-  development log) — this project keeps its own classic numbered program
-  store (`program_store.cpp`) and rewrites it to label-based source only
-  at `RUN` time, so typed BASIC still reads and behaves like 1980s BASIC.
-  `SCREEN`/`CLS` are already bound as real My-Basic functions;
-  `PSET`/`LINE`/`CIRCLE` will follow the same pattern once `SCREEN 4`
-  exists, bound by hand to the existing `GfxRenderer`/`EInkDisplay` rather
-  than any interpreter's own built-in graphics backend, to avoid
-  duplicating the e-ink-tuned refresh pipeline MicroWriter already has.
-  [tinybasic](https://github.com/slviajero/tinybasic) and
-  [PicoBB](https://github.com/Memotech-Bill/PicoBB) (BBC BASIC for
-  RP2040) are architecture references, not dependencies — PicoBB's
+- **Interpreter**: [Stefan Lenz's IoT BASIC](https://github.com/slviajero/tinybasic)
+  — line-numbered, tokenised, no `malloc` (its program memory is one static
+  array), and closer to a 1980s BASIC than anything else that fits. It is
+  **not vendored**: `patches/tinybasic/fetch.sh` pulls a pinned commit and
+  four scripts patch it, so what this repo carries is the *difference* from
+  upstream rather than a copy that quietly drifts. See
+  [patches/tinybasic/README.md](patches/tinybasic/README.md).
+
+  What the patches do is small on purpose — configure the language flags,
+  rename its `setup()`/`loop()` so they don't collide with the firmware's,
+  give it C linkage, and set build flags. The runtime it is written against
+  is ours: `editor/src/tb_runtime.cpp` maps its 76-symbol contract onto the
+  character terminal in `screen_editor.cpp` and the SD card, and
+  `tb_bridge.cpp` hands it whole typed lines. Roughly half that contract is
+  peripherals this device doesn't have and is stubbed.
+
+  An earlier version of this project used
+  [My-Basic](https://github.com/paladin-t/my_basic) and is gone. It was a
+  good embedding library and the wrong language: alphabetic labels instead
+  of line numbers, which meant maintaining a separate numbered program
+  store and rewriting it at `RUN` time. The development log records the
+  swap and why.
+
+  [PicoBB](https://github.com/Memotech-Bill/PicoBB) (BBC BASIC for RP2040)
+  remains an architecture reference, not a dependency — its
   `framebuf.c`/`vducmd.c` split (hardware-agnostic line/circle/triangle/
   flood-fill on top of three primitives) is the model for the graphics
-  layer once `SCREEN 4` gets built.
+  layer once `SCREEN 4` gets built, bound by hand to the existing
+  `GfxRenderer`/`EInkDisplay` rather than to any interpreter's own graphics
+  backend, to avoid duplicating the e-ink-tuned refresh pipeline
+  MicroWriter already has.
 - **SD card layout**: this repo's own folder name, `/MicroBASIC/`, is also
   the on-device SD card folder MicroBASIC will use for its own files
   (programs, settings) — same convention the dual-boot reader siblings
@@ -168,14 +185,26 @@ d-pad + power button, BLE 5.0, SD card. Same target as MicroWriter.
   and validate `EInkDisplay::displayWindow()` (currently marked
   experimental, unused elsewhere in MicroWriter) as the partial-refresh
   strategy for it, then bind `PSET`/`LINE`/`CIRCLE`.
-- On-screen status feedback beyond LOAD/SAVE's `Loaded.`/`Saved.`/errors
-  — nothing yet for e.g. a program too large for the RUN/serialize
-  buffers to hold.
+- `SCREEN` from inside a program. It is the firmware's command, not the
+  interpreter's, so today it only works typed at the prompt — which is why
+  `examples/pacman.bas` has to ask for `SCREEN 1` in a REM. Making it
+  available to programs means adding a token to the interpreter, which is a
+  patch rather than an integration.
+- The **phantom button presses** documented in the development log: the
+  d-pad registers presses nobody made, worse since the interpreter landed,
+  and reproducible on a second X4 and on stock MicroSlate but never on the
+  readers. The leading hypothesis is the shared-ADC button ladder being read
+  during a DFS frequency transition — the readers never call
+  `esp_pm_configure`, we do. The decisive experiment (pin 80MHz, light sleep
+  off) is written up there and has not been run.
+- `CONT` after a break usually fails with a syntax error. Diagnosed on the
+  host harness as an upstream bug, not an integration one; documented in
+  [docs/HARDWARE_TESTS.md](docs/HARDWARE_TESTS.md) with the exact mechanism.
 - Eventually: a real 3-way OTA/dual-boot setup (reader + MicroWriter +
   MicroBASIC on one SD card/flash) — needs `OtaBootSwitch.cpp` generalized
   from its current hardcoded 2-partition scheme, and a 3rd app partition.
   MicroWriter's own editor partition (`app1`, `0x650000`) has a lot of
-  slack (~1.6MB used of 6.25MB, since it never has to fit a full reader),
+  slack (~1.8MB used of 6.25MB, since it never has to fit a full reader),
   so shrinking just that one — not the reader's `app0`, which is nearly
   full with CrossInk — is the likely path once this is worth doing for
   real.

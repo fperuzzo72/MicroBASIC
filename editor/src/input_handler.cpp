@@ -871,6 +871,10 @@ static void pumpProgramInput() {
         case HID_KEY_LEFT:  c = 29; break;
         case HID_KEY_UP:    c = 30; break;
         case HID_KEY_DOWN:  c = 31; break;
+        // ASCII backspace. Needed by INPUT, which does its own line editing
+        // inside the interpreter (tb_runtime.cpp's consins) and has no other
+        // way to hear about it; a program using GET sees it too, correctly.
+        case HID_KEY_BACKSPACE: c = 8; break;
         default: continue;
       }
     }

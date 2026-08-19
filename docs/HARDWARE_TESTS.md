@@ -255,7 +255,22 @@ number to keep watching.
 
 `-DRELEASE_BUILD` is back on now that the sync flow is confirmed.
 
-## 12. Regression check
+## 12. Round nine: INPUT (built, NOT yet flashed)
+
+- [ ] `10 INPUT "NOME? ";A$` / `20 PRINT "OI ";A$` -- the prompt appears
+      immediately (not after a delay), typing echoes, Enter accepts.
+- [ ] Backspace erases inside INPUT and stops at the start of the answer.
+- [ ] `INPUT N` (numeric): a non-number re-asks; a number assigns.
+- [ ] `INPUT A$` with no prompt string shows `? `.
+- [ ] Esc / Ctrl+C during an INPUT stops the program rather than being
+      stored as text.
+- [ ] Arrow keys pressed during INPUT are ignored, not inserted.
+- [ ] After Enter, whatever the program prints next starts on the line
+      below the answer.
+- [ ] A long-running program with an INPUT in a loop still repaints and
+      does not trip the watchdog.
+
+## 13. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).

@@ -69,6 +69,10 @@ static char rootNameBuf[MAX_FILENAME_LEN];
 // unchanged screen isn't refreshed. Defined next to byield().
 static bool termDirty;
 
+// Set by consins() when a break arrives during INPUT, so checkch() reports it
+// on the next statement even though consins() consumed the keypress.
+static bool breakLatched = false;
+
 // Partial VT52 escape sequence, see outch().
 enum : uint8_t { VT_NONE, VT_ESC, VT_ROW, VT_COL };
 static uint8_t vtState = VT_NONE;
@@ -168,7 +172,12 @@ char inch() { return inputReadProgramKey(); }
 // injected whole into the interpreter's buffer by tb_bridge.cpp, so checkch()
 // is only ever reached on the break path.
 char checkch() {
-  if (!inputConsumeBreakPending()) return 0;
+  bool broke = inputConsumeBreakPending();
+  if (breakLatched) {
+    breakLatched = false;
+    broke = true;
+  }
+  if (!broke) return 0;
 
   // Announce it. The interpreter's own break path is silent -- it just stops
   // and returns to the prompt -- which on a screen that is already full of a
@@ -190,16 +199,91 @@ char checkch() {
 // BASIC's @A. Also what GET tests before calling inch().
 uint16_t availch() { return (uint16_t)inputProgramKeyCount(); }
 
-// Reads one line. This is where this firmware's own screen editor has to take
-// over from the interpreter's: upstream's version drives its console directly,
-// but here the "console" is a character grid with a cursor the user can move
-// anywhere, wrapped logical lines, and its own Enter semantics. Left
-// unimplemented until the UI is actually switched over; returning 0 means "no
-// line available", which is safe.
+// Reads one line, blocking until Enter. This is what makes INPUT work, and it
+// is the one place where the interpreter asks for something the rest of this
+// integration was built to avoid: the firmware normally hands whole lines to
+// the interpreter (tb_bridge.cpp) and never has it wait on a key.
+//
+// It has to block, because it is called from inside statement(), which is
+// inside tbExecuteLine(), which is loopTask. So for as long as this runs,
+// loop() is not running -- nothing else redraws the screen, feeds the
+// watchdog, or drains the keyboard. All three are done here.
+//
+// Deliberately its own small line editor rather than the screen editor's:
+// this reads a *value*, not a program line, and the screen editor's cursor
+// movement, logical-line continuation and Enter semantics would let the user
+// wander off into the rest of the terminal mid-INPUT. Characters are echoed
+// as typed and backspace erases; nothing else is honoured, and the arrow
+// codes (28-31) are dropped rather than being stored as text.
+//
+// Buffer contract, matching upstream's own consins exactly (verified against
+// its POSIX runtime): text at b[1..z], NUL at b[z+1], and b[0] holds the
+// length -- INPUT for strings calls this as ins(s.ir - 1, maxlen), so the
+// length byte lands in the byte before the string data. Getting this wrong
+// is the same class of silent corruption as the ibuffer prefix in tb_bridge.
 uint16_t consins(char* b, uint16_t nb) {
-  (void)b;
-  (void)nb;
-  return 0;
+  // The prompt ("? ", or the program's own string) has already gone through
+  // outch by now. Show it before blocking -- byield() would otherwise sit on
+  // it for up to FLUSH_INTERVAL_MS while the user stares at a screen that
+  // hasn't asked them anything yet.
+  termDirty = false;
+  screenEditorFlushDisplay();
+
+  uint16_t z = 1;
+  for (;;) {
+    const char c = inputReadProgramKey();
+
+    if (c == 0) {
+      // Nothing typed. Check for a break, then idle: the panel still has to
+      // repaint what has been typed so far, and the idle task still has to
+      // run, and this loop is the only thing keeping either alive.
+      if (inputConsumeBreakPending()) {
+        // Signalled through the buffer, which is how the interpreter expects
+        // to hear it: innumber() returns -1 on seeing BREAKCHAR and INPUT
+        // stops the program. Latched as well so the run loop's own checkch()
+        // fires on the next statement -- string INPUT has no equivalent of
+        // innumber's check and would otherwise just store the character.
+        breakLatched = true;
+        b[1] = BREAKCHAR;
+        b[2] = 0;
+        b[0] = 1;
+        return 1;
+      }
+      byield();
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    if (c == '\n' || c == '\r') break;
+
+    if (c == 8) {  // backspace
+      if (z > 1) {
+        z--;
+        screenEditorBackspace();
+        termDirty = true;
+      }
+      continue;
+    }
+
+    if (c < ' ' || (unsigned char)c > 126) continue;  // arrows, tabs, controls
+    if (z >= nb) continue;                            // full: keep waiting for Enter
+
+    b[z++] = c;
+    screenEditorInsertCodepoint((uint32_t)(unsigned char)c);
+    termDirty = true;
+  }
+
+  b[z] = 0;
+  z--;
+  b[0] = (char)(unsigned char)z;
+
+  // Enter ends the line on screen too, so whatever the program prints next
+  // starts below the answer rather than beside it.
+  screenEditorStartNewInputLine();
+  charcount[OSERIAL] = 0;
+  termDirty = true;
+
+  return z;
 }
 
 uint16_t ins(char* b, uint16_t nb) { return consins(b, nb); }
