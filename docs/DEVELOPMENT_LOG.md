@@ -2059,3 +2059,72 @@ second visible:
    They are now distinguished, and the failure message carries the largest
    free block so the cause is readable off the screen rather than needing a
    serial cable.
+
+## Filenames: who owns the name
+
+Reported: creating a program named `novo.bas` produced `novobas`, and the
+browser showed neither `.bas` nor the `.txt` of a file already in the folder.
+Both come from the same assumption, inherited from MicroWriter: that the
+filename is an implementation detail and the *title* is what the user deals
+with. `titleToFilename()` dropped every non-alphanumeric character, the dot
+included, then appended `.txt`; `filenameToTitle()` stopped at the first dot
+and prettified what was left.
+
+That is right for notes and wrong for programs, and the reason is not
+cosmetic: a program's name is something the user *says to the interpreter*.
+`LOAD "pacman.bas"` has to find the file, so what the browser shows must be
+what LOAD takes. The collection descriptor gained a `rawNames` flag:
+
+- Programs show and edit the filename itself. The dot is a legal character,
+  a typed extension is kept, and the default is supplied only when none was
+  typed -- so `novo.bas` stays `novo.bas`, `novo` becomes `novo.bas`, and
+  `novo.b` stays `novo.b`. Still lowercased, since the SD card holds
+  everything lowercase and LOAD should never have to guess at case.
+- Notes keep MicroWriter's behaviour exactly.
+
+The title-edit screen says which one it is ("Edit Filename" over "Program
+filename (e.g. pacman.bas)" versus "Edit Title" / "Note title"), and a new
+program is prefilled with `untitled.bas` rather than `Untitled` -- seeing the
+extension in the field is what tells the user it is theirs to change.
+
+One bug fell out of making the field show the real filename.
+`deriveUniqueFilename()` bumps a name to `_2` when it already exists, and the
+file being renamed always exists -- so confirming a rename *without changing
+anything* renamed the file to `name_2`. That was rare when the field held a
+prettified title and is the common case when it holds the exact filename, so
+it now takes an `except` argument naming the file that doesn't count as a
+collision. It also splits at the last dot rather than assuming the
+collection's own extension, so `game.b` collides into `game_2.b`.
+
+## Removing the My-Basic layer
+
+The WiFi scan failure reported above turned out to be the heap, and the
+message added for it said so: "Radio busy (heap 7K)". Bringing up the WiFi
+stack needs a contiguous block and there was not one.
+
+The obvious place to find it was the layer the interpreter replaced and
+nothing had deleted:
+
+- `program_store.cpp` -- an 8192-byte packed program buffer. The interpreter
+  has owned program storage since the swap.
+- `mb_bridge.cpp` -- the My-Basic bridge, already gone from flash (the linker
+  had garbage-collected it) but still in the tree.
+- `screen_editor`'s `SAVE`/`LOAD` implementation and its two 4096-byte
+  buffers -- `SAVE`/`LOAD` are the interpreter's now, streaming straight to
+  the SD card.
+- `input_handler`'s LIST/FILES `MORE?` pagination, including a 3200-byte
+  filename table. The interpreter's own LIST and CATALOG scroll instead, as
+  MSX did; nothing had started the paging state machine since.
+
+Every one of these was already flagged `defined but not used` by the
+compiler. Static RAM went from 180472 to 169048 bytes -- 11.4KB back, and
+because static `.bss` sits below the heap, that is 11.4KB of *contiguous*
+heap rather than 11.4KB scattered.
+
+Whether that is enough is a hardware question; the failure message now
+reports the number either way. If it is still short, the next candidates are
+the text editor's 16KB clipboard (allocate on demand) and the interpreter's
+16KB `mem` (tunable in patches/tinybasic/03, at the cost of program space).
+Note also that MicroWriter, where sync works, does not carry the
+interpreter's `mem` at all -- 16KB of the difference is simply the price of
+having a BASIC in the same binary.

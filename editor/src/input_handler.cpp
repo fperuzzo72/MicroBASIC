@@ -5,7 +5,6 @@
 #include "wifi_sync.h"
 #include "dead_keys.h"
 #include "screen_editor.h"
-#include "program_store.h"
 #include "tb_bridge.h"
 #include "vc_browser.h"
 
@@ -309,157 +308,7 @@ static void handleEditorKey(uint8_t keyCode, uint8_t modifiers) {
   }
 }
 
-// Handle MicroBASIC SCREEN 1 grid editor input — first test pass, no
-// interpreter, no selection/clipboard, just cursor movement and typing
-// straight into the fixed 48x15 grid.
-// Strips a pair of surrounding double quotes, if present ("MYPROG" -> MYPROG).
-static void stripQuotes(const char* in, char* out, int outSize) {
-  int len = strlen(in);
-  if (len >= 2 && in[0] == '"' && in[len - 1] == '"') {
-    len -= 2;
-    if (len >= outSize) len = outSize - 1;
-    memcpy(out, in + 1, len);
-    out[len] = '\0';
-  } else {
-    strncpy(out, in, outSize - 1);
-    out[outSize - 1] = '\0';
-  }
-}
-
-// --- LIST/FILES pagination -------------------------------------------------
-// MORE?-style: prints as many lines as fit on screen, then shows "MORE?"
-// and waits -- any keypress clears it and resumes. Nothing here blocks;
-// it's just state checked at the top of handleScreenEditorKey.
-
-enum class PagingKind { NONE, LIST, FILES };
-static PagingKind pagingKind = PagingKind::NONE;
-static int pagingNext = 0;
-static int pagingEnd = 0;  // LIST only, exclusive
-static char pagingFiles[MAX_FILES][MAX_FILENAME_LEN];
-static int pagingFileCount = 0;
-
-static void printListLine(int idx) {
-  int num = 0;
-  const char* text = nullptr;
-  if (!programStoreGetByIndex(idx, &num, &text)) return;
-  char buf[MAX_PROGRAM_LINE_LEN + 16];
-  snprintf(buf, sizeof(buf), "%d %s\n", num, text);
-  screenEditorTermPrint(buf);
-}
-
-// Prints until the screen is full or the batch is done. Returns true if
-// "MORE?" is now showing (paging still active), false if finished.
-static bool pageBatch() {
-  int total = (pagingKind == PagingKind::LIST) ? pagingEnd : pagingFileCount;
-  while (pagingNext < total) {
-    if (screenEditorRowsLeftOnScreen() < 2) {
-      screenEditorTermPrint("MORE?");  // no trailing \n -- see continuePaging()
-      return true;
-    }
-    if (pagingKind == PagingKind::LIST) {
-      printListLine(pagingNext);
-    } else {
-      screenEditorTermPrint(pagingFiles[pagingNext]);
-      screenEditorTermPrint("\n");
-    }
-    pagingNext++;
-  }
-  pagingKind = PagingKind::NONE;
-  return false;
-}
-
-// The "MORE?" prompt sits alone on the row the cursor was on when
-// pageBatch() printed it (nothing since has touched logical-line-start),
-// so clearing the logical line clears exactly that row and puts the
-// cursor back at its start, ready to keep printing from there.
-static void continuePaging() {
-  screenEditorClearLogicalLine();
-  pageBatch();
-}
-
-static void startListCommand(const char* argStr) {
-  int startNum = -1;
-  int endNum = -1;
-  bool hasRange = false;
-  if (argStr && argStr[0]) {
-    const char* dash = strchr(argStr, '-');
-    if (dash) {
-      startNum = atoi(argStr);
-      endNum = atoi(dash + 1);
-      hasRange = true;
-    } else {
-      startNum = atoi(argStr);
-    }
-  }
-
-  int count = programStoreCount();
-  int startIdx = 0;
-  int endIdxExclusive = count;
-  if (startNum >= 0) {
-    while (startIdx < count) {
-      int num;
-      const char* text;
-      programStoreGetByIndex(startIdx, &num, &text);
-      if (num >= startNum) break;
-      startIdx++;
-    }
-    if (hasRange) {
-      endIdxExclusive = startIdx;
-      while (endIdxExclusive < count) {
-        int num;
-        const char* text;
-        programStoreGetByIndex(endIdxExclusive, &num, &text);
-        if (num > endNum) break;
-        endIdxExclusive++;
-      }
-    }
-  }
-
-  pagingKind = PagingKind::LIST;
-  pagingNext = startIdx;
-  pagingEnd = endIdxExclusive;
-  screenEditorStartNewInputLine();
-  pageBatch();
-}
-
-static void startFilesCommand() {
-  pagingFileCount = 0;
-  auto dir = SdMan.open("/MicroBASIC/programs");
-  if (dir && dir.isDirectory()) {
-    dir.rewindDirectory();
-    char name[256];
-    // Every file in the programs directory is listed, not just *.bas: SAVE
-    // stores under exactly the name typed and doesn't force an extension
-    // (see screen_editor.h), so filtering by .bas here would hide the very
-    // files the user just saved. Only dot-files and subdirectories are
-    // skipped.
-    for (auto file = dir.openNextFile(); file; file = dir.openNextFile()) {
-      file.getName(name, sizeof(name));
-      if (name[0] != '.' && !file.isDirectory() && pagingFileCount < MAX_FILES) {
-        strncpy(pagingFiles[pagingFileCount], name, MAX_FILENAME_LEN - 1);
-        pagingFiles[pagingFileCount][MAX_FILENAME_LEN - 1] = '\0';
-        pagingFileCount++;
-      }
-      file.close();
-    }
-  }
-  if (dir) dir.close();
-
-  pagingKind = PagingKind::FILES;
-  pagingNext = 0;
-  screenEditorStartNewInputLine();
-  pageBatch();
-}
-
 // --- Enter-key dispatch -----------------------------------------------------
-// A logical line (screenEditorGetLogicalLineText() -- may span several
-// physical rows if it wrapped while typing) is either:
-//   - a numbered BASIC program line ("10 PRINT ...") -> program_store,
-//     stays visible on screen exactly as typed;
-//   - one of this environment's own direct-mode commands (MENU/NEW/RUN/
-//     LIST/FILES/SAVE/LOAD) -- cleared from the visible terminal before
-//     running, same reasoning as the very first LOAD/SAVE/MENU pass;
-//   - anything else -> a My-Basic statement, executed immediately
 // A logical line (screenEditorGetLogicalLineText() -- may span several
 // physical rows if it wrapped while typing) goes almost entirely to the
 // interpreter, which owns program storage and the classic commands:
@@ -468,9 +317,10 @@ static void startFilesCommand() {
 //   LIST/RUN/NEW/SAVE/LOAD/CLS/CONT/DELETE/CATALOG/...  -> its own handling
 //   anything else -> executed immediately in direct mode
 //
-// Only three things are intercepted, and only because they are this device's
+// Only four things are intercepted, and only because they are this device's
 // and not the language's: MENU/EXIT (leave the screen editor), VC (the program
-// picker) and SCREEN (the display modes). Everything the interpreter already
+// picker), SCREEN (the display modes) and FILES/DIR (aliases for the
+// interpreter's own CATALOG). Everything the interpreter already
 // implements is deliberately left to it -- routing it here instead would mean
 // reimplementing, and diverging from, behaviour that is already correct.
 static void executeLogicalLine(const char* line) {
@@ -562,12 +412,6 @@ static void executeLogicalLine(const char* line) {
 }
 
 static void handleScreenEditorKey(uint8_t keyCode, uint8_t modifiers) {
-  if (pagingKind != PagingKind::NONE) {
-    continuePaging();
-    screenDirty = true;
-    return;
-  }
-
   if (keyCode == HID_KEY_ESCAPE) {
     deadKeyReset();  // discard any pending dead key
     applyOrientationToRenderer(currentOrientation);  // restore the real setting
@@ -720,8 +564,8 @@ static void dispatchEvent(const KeyEvent& event) {
         if (mainMenuSelection == 0) {
           // MicroBASIC: the SCREEN 0-3 terminal -- see MicroBASIC repo's
           // docs/DEVELOPMENT_LOG.md. Only the terminal display resets;
-          // whatever's in program_store (LOADed or typed earlier this
-          // session) stays put.
+          // whatever program the interpreter is holding (LOADed or typed
+          // earlier this session) stays put.
           screenEditorReset();
           applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
           currentState = UIState::SCREEN_EDITOR;
@@ -744,7 +588,12 @@ static void dispatchEvent(const KeyEvent& event) {
           setFileCollection(mainMenuSelection == 2 ? FileCollection::PROGRAMS
                                                    : FileCollection::NOTES);
           createNewFile();
-          openTitleEdit("Untitled", UIState::TEXT_EDITOR);
+          // Programs are named by filename, so the prefill shows the shape
+          // of one rather than a title -- the extension is the user's to
+          // change, and seeing it there is what says so.
+          openTitleEdit(getFileCollection() == FileCollection::PROGRAMS
+                            ? "untitled.bas" : "Untitled",
+                        UIState::TEXT_EDITOR);
         } else if (mainMenuSelection == 5) {
           currentState = UIState::SETTINGS;
           screenDirty = true;

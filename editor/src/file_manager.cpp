@@ -11,14 +11,21 @@ struct CollectionInfo {
   const char* fallback; // base name when a title sanitises down to nothing
   const char* label;
   bool extFilter;       // list only *ext, or everything the folder holds
+  bool rawNames;        // show/edit the filename itself, extension and all
 };
 
-// Programs are listed unfiltered on purpose: BASIC's SAVE stores under
-// exactly the name typed, with no extension forced on, so a folder of
-// perfectly good programs can contain no .bas at all.
+// Two things are different about programs, and both come from the same fact:
+// a program's name is something the user says to the interpreter. `LOAD "X"`
+// has to find the file, so what the browser shows must be what LOAD takes --
+// the filename, extension included, not a prettified title. And SAVE stores
+// under exactly the name typed with no extension forced on, so the folder is
+// listed unfiltered: it can legitimately contain no .bas at all.
+//
+// Notes keep MicroWriter's behaviour, where the filename is an implementation
+// detail and the title is what the user deals with.
 static const CollectionInfo COLLECTIONS[] = {
-  {"/notes",               ".txt", "note",    "Notes",    true},
-  {"/MicroBASIC/programs", ".bas", "program", "Programs", false},
+  {"/notes",               ".txt", "note",    "Notes",    true,  false},
+  {"/MicroBASIC/programs", ".bas", "program", "Programs", false, true},
 };
 
 static FileCollection currentCollection = FileCollection::NOTES;
@@ -31,9 +38,16 @@ static int fileCount = 0;
 // Shared state
 extern UIState currentState;
 
-// Convert filename to a readable display title.
-// "my_note_2.txt" -> "My Note 2"
+// Convert filename to what the user sees and edits.
+// Notes:    "my_note_2.txt" -> "My Note 2"  (the extension is ours to manage)
+// Programs: "pacman.bas"    -> "pacman.bas" (the name is the user's to say)
 static void filenameToTitle(const char* filename, char* out, int maxLen) {
+  if (coll().rawNames) {
+    strncpy(out, filename, maxLen - 1);
+    out[maxLen - 1] = '\0';
+    return;
+  }
+
   int j = 0;
   bool capitalizeNext = true;
   for (int i = 0; filename[i] != '\0' && filename[i] != '.' && j < maxLen - 1; i++) {
@@ -51,46 +65,71 @@ static void filenameToTitle(const char* filename, char* out, int maxLen) {
   if (j == 0) strncpy(out, "Untitled", maxLen - 1);
 }
 
-// Convert a title to a valid FAT filename (lowercase, spaces->underscores,
-// non-alphanumeric stripped, the collection's extension appended).
+// Convert what the user typed into a valid FAT filename: lowercase (the SD
+// card holds everything lowercase, so LOAD never has to guess at case),
+// spaces to underscores, anything else dropped.
+//
+// The dot is where the two collections part. For notes it is not a legal
+// character -- the extension is ours, appended here. For programs it is, and
+// a typed one is kept: the user asked to control the name *and* the ending,
+// so "novo.bas" stays "novo.bas" rather than becoming "novobas.bas", and the
+// default extension is only supplied when none was typed at all.
 static void titleToFilename(const char* title, char* out, int maxLen) {
-  const CollectionInfo& c = coll();
-  const int extLen = (int)strlen(c.ext);
-  int maxBase = maxLen - extLen - 1;
+  const CollectionInfo& ci = coll();
+  const int extLen = (int)strlen(ci.ext);
+  const int maxBase = maxLen - extLen - 1;
+  bool hasDot = false;
   int j = 0;
   for (int i = 0; title[i] != '\0' && j < maxBase; i++) {
     char c = title[i];
     if (c >= 'A' && c <= 'Z') c += 32;
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
       out[j++] = c;
+    } else if (ci.rawNames && c == '.') {
+      // Not at the start, and not twice: a leading dot hides the file and a
+      // second one is a name no BASIC user means to type.
+      if (j > 0 && !hasDot) { out[j++] = c; hasDot = true; }
     } else if (c == ' ' || c == '_' || c == '-') {
       if (j > 0 && out[j - 1] != '_') out[j++] = '_';
     }
   }
-  while (j > 0 && out[j - 1] == '_') j--;
-  if (j == 0) { strncpy(out, c.fallback, maxLen - 1); j = (int)strlen(out); }
-  strcpy(out + j, c.ext);
+  while (j > 0 && (out[j - 1] == '_' || out[j - 1] == '.')) { if (out[j-1] == '.') hasDot = false; j--; }
+  if (j == 0) { strncpy(out, ci.fallback, maxLen - 1); j = (int)strlen(out); hasDot = false; }
+  out[j] = '\0';
+  if (!hasDot) strcpy(out + j, ci.ext);
 }
 
 // Derive a unique filename in the current collection from a title, handling
 // collisions with a _2, _3 suffix.
-void deriveUniqueFilename(const char* title, char* out, int maxLen) {
+void deriveUniqueFilename(const char* title, char* out, int maxLen, const char* except) {
   titleToFilename(title, out, maxLen);
+
+  // `except` is the file being renamed. Without it, confirming a rename
+  // without actually changing anything collides with the file itself and
+  // bumps it to _2 -- which used to be rare, because the field held a
+  // prettified title, and is now the common case for programs, where it
+  // holds the exact filename and confirming it unchanged is natural.
+  if (except && strcmp(out, except) == 0) return;
 
   char path[320];
   snprintf(path, sizeof(path), "%s/%s", coll().dir, out);
   if (!SdMan.exists(path)) return;
 
   // Collision — strip .txt, try _2, _3 ...
+  // Split at the *last* dot rather than assuming the collection's own
+  // extension: with programs the user picks the extension, so "game.b" and
+  // "game.bas" both have to collide-suffix into "game_2.b" / "game_2.bas".
   char base[MAX_FILENAME_LEN];
-  strncpy(base, out, maxLen - 1);
-  base[maxLen - 1] = '\0';
-  const size_t extLen = strlen(coll().ext);
-  if (strlen(base) > extLen) base[strlen(base) - extLen] = '\0';
+  strncpy(base, out, sizeof(base) - 1);
+  base[sizeof(base) - 1] = '\0';
+  char* dot = strrchr(base, '.');
+  char ext[16];
+  snprintf(ext, sizeof(ext), "%s", dot ? dot : coll().ext);
+  if (dot) *dot = '\0';
 
   int suffix = 2;
   while (SdMan.exists(path) && suffix <= 99) {
-    snprintf(out, maxLen, "%s_%d%s", base, suffix++, coll().ext);
+    snprintf(out, maxLen, "%s_%d%s", base, suffix++, ext);
     snprintf(path, sizeof(path), "%s/%s", coll().dir, out);
   }
 }
@@ -250,7 +289,7 @@ void createNewFile() {
 // Rename a file on disk to match a new title, updating editor state if needed.
 void updateFileTitle(const char* filename, const char* newTitle) {
   char newFilename[MAX_FILENAME_LEN];
-  deriveUniqueFilename(newTitle, newFilename, MAX_FILENAME_LEN);
+  deriveUniqueFilename(newTitle, newFilename, MAX_FILENAME_LEN, filename);
 
   if (strcmp(newFilename, filename) != 0) {
     char oldPath[320], newPath[320];

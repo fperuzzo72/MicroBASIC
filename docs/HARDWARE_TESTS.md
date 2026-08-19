@@ -206,7 +206,25 @@ number to keep watching.
       failure it was -- "Radio busy (heap NNK)" means the WiFi stack could
       not allocate, "Scan failed" means the radio returned nothing.
 
-## 9. Regression check
+## 9. Round six: filenames and the reclaimed heap
+
+- [ ] `New Program`: the field is prefilled `untitled.bas` and the header
+      says "Edit Filename". Typing `novo.bas` produces a file called exactly
+      `novo.bas`; typing `novo` produces `novo.bas`; typing `novo.b`
+      produces `novo.b`.
+- [ ] `Browse Programs` shows full filenames, extensions included.
+- [ ] `LOAD "novo.bas"` at the BASIC prompt opens what `New Program` saved.
+- [ ] Renaming a file and confirming it *unchanged* leaves the name alone
+      (it used to become `name_2`).
+- [ ] `New Note` / `Browse Files` are unchanged: titles, not filenames.
+- [ ] Sync: 11.4KB of static RAM came back, so the scan may now work. If it
+      still fails, the message reports the largest free block -- that number
+      is the thing to report.
+- [ ] Regression from the removals: `LIST` of a long program scrolls (no
+      `MORE?` prompt, which is intended), `CATALOG`/`FILES`/`DIR` still list,
+      `SAVE`/`LOAD` still work, and the screen editor still takes typing.
+
+## 10. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).

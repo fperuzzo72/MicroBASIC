@@ -12,7 +12,7 @@
 // Scrolling: typing or printing past the last row shifts every row up by
 // one and clears the new bottom row -- whatever scrolled off is gone
 // (this is a terminal, not a persistent buffer). The actual PROGRAM lives
-// in program_store.h, entirely separate from what's currently visible.
+// in the interpreter's own memory, entirely separate from what's visible.
 
 void screenEditorSetMode(int n);  // 0-3, see README's SCREEN table
 int screenEditorGetMode();
@@ -81,40 +81,10 @@ int screenEditorRowsLeftOnScreen();
 void screenEditorTermPrint(const char* utf8Text);
 void screenEditorTermPrintLine(const char* utf8Text);  // + trailing newline
 
-// --- SAVE/LOAD: the actual program (program_store.h), as plain text ---
-// Stored under /MicroBASIC/programs/, under exactly the name typed -- no
-// extension is forced on, so SAVE "TESTE" produces a file called TESTE.
-// LOAD tries the typed name first and falls back to name + ".bas", so
-// round-tripping works either way and a .bas dropped in from a PC is still
-// found by its bare name.
-//
-// The file content is always plain text (`10 PRINT "X"` per line, exactly
-// what LIST shows), never a tokenised/binary form, so programs can be read
-// and edited directly off the SD card without this firmware.
-//
-// These report *why* they failed rather than a bare bool: in a BASIC
-// environment the difference between "no such file", "disk error" and
-// "program too big to serialise" is exactly what the user needs to act on,
-// and all three used to surface as the same "?Save failed".
-enum class ProgramFileResult {
-  OK,
-  BAD_NAME,    // empty, or nothing usable left after sanitising
-  NOT_FOUND,   // LOAD only
-  TOO_LARGE,   // program doesn't fit PROGRAM_TEXT_BUFFER_SIZE, or file bigger than it
-  IO_ERROR,    // SD read/write failed
-  EMPTY,       // LOAD only: file read fine but held no valid numbered lines
-};
-
-// One-line message for the terminal, e.g. "?File not found". Never null.
-const char* programFileResultMessage(ProgramFileResult r);
-
-ProgramFileResult screenEditorSaveProgram(const char* name);
-ProgramFileResult screenEditorLoadProgram(const char* name);  // replaces the program store
-
 // Draws the terminal and blocks until the e-ink refresh finishes. Normal
 // screen updates go through main.cpp's loop() (draw, then poll the
 // refresh non-blockingly on later iterations) -- but a running BASIC
-// program blocks loopTask for its whole duration inside mb_run(), so
+// program blocks loopTask for its whole duration inside the interpreter, so
 // nothing printed by PRINT would ever actually reach the display until
 // the program finished. The runtime's byield() calls this periodically (throttled
 // by time, not by print volume) during RUN so a loop's output is visible

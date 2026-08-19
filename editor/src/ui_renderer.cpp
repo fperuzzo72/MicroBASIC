@@ -599,11 +599,16 @@ void drawRenameScreen(GfxRenderer& renderer, HalGPIO& gpio) {
 
   if (darkMode) clippedFillRect(renderer, 0, 0, sw, sh, true);
 
-  drawClippedText(renderer, FONT_SMALL, 10, 5, "Edit Title", 0, tc, EpdFontFamily::BOLD);
+  // Programs are named, notes are titled -- what this field does is genuinely
+  // different between the two, so it says which.
+  const bool raw = getFileCollection() == FileCollection::PROGRAMS;
+  drawClippedText(renderer, FONT_SMALL, 10, 5, raw ? "Edit Filename" : "Edit Title",
+                  0, tc, EpdFontFamily::BOLD);
   drawBattery(renderer, gpio);
   clippedLine(renderer, 5, 32, sw - 5, 32, tc);
 
-  drawClippedText(renderer, FONT_SMALL, 20, 42, "Note title:", 0, tc);
+  drawClippedText(renderer, FONT_SMALL, 20, 42,
+                  raw ? "Program filename (e.g. pacman.bas):" : "Note title:", 0, tc);
   int boxY = 64, boxH = 36;
   int textY = boxY + 8;
   renderer.drawRect(15, boxY, sw - 30, boxH, tc);
