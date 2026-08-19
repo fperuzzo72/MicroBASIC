@@ -3,6 +3,7 @@
 #include <algorithm>
 #include "text_editor.h"
 #include "file_manager.h"
+#include "tb_bridge.h"
 #include "ble_keyboard.h"
 #include "wifi_sync.h"
 #include "screen_editor.h"
@@ -1177,6 +1178,10 @@ void drawScreenEditor(GfxRenderer& renderer, HalGPIO& gpio) {
 
   const int cursorRow = screenEditorGetCursorRow();
   const int cursorCol = screenEditorGetCursorCol();
+  // Hidden while the interpreter has control: this screen is redrawn during
+  // a RUN (byield flushes it), and a cursor block parked beside whatever the
+  // program printed last is not a cursor, it is a smudge on the picture.
+  const bool showCursor = !tbIsRunning();
   const int cols = screenEditorCols();
   const int rows = screenEditorRows();
   const int cellW = screenEditorCellW();
@@ -1188,7 +1193,7 @@ void drawScreenEditor(GfxRenderer& renderer, HalGPIO& gpio) {
     const int y = row * cellH;
     for (int col = 0; col < cols; col++) {
       const int x = marginX + col * cellW;
-      const bool isCursor = (row == cursorRow && col == cursorCol);
+      const bool isCursor = showCursor && (row == cursorRow && col == cursorCol);
       if (isCursor) {
         renderer.fillRect(x, y, cellW, cellH, true);
       }

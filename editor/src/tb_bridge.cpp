@@ -11,6 +11,9 @@ extern bool screenDirty;
 #include "tb_interp.h"
 
 static bool ready = false;
+static bool running = false;
+
+bool tbIsRunning() { return running; }
 
 void tbSetup() {
   if (ready) return;
@@ -50,6 +53,7 @@ bool tbExecuteLine(const char* line) {
   form = 0;
 
   bi = ibuffer;
+  running = true;
   nexttoken();
 
   if (token == NUMBER) {
@@ -62,6 +66,7 @@ bool tbExecuteLine(const char* line) {
     st = SINT;
   }
 
+  running = false;
   screenDirty = true;
   const bool failed = (er != 0);
   if (failed) {

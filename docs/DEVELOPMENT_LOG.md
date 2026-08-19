@@ -2195,3 +2195,92 @@ Yes  Down/Esc: No"), so the flow looks right on inspection. The open question
 is whether that screen is being reached and dismissed, possibly by a
 keystroke lost to the BLE dropout above. Needs a hardware observation before
 changing anything.
+
+## The reboot on entering Sync: my own fix
+
+Worth writing down in full, because the log said it in one line and the
+mistake is an easy one to repeat.
+
+    wifi:Set ps type: 1          <- the default
+    wifi:Set ps type: 0          <- WiFi.setSleep(false), added last round
+    E wifi:Error! Should enable WiFi modem sleep when both WiFi and
+      Bluetooth are enabled!!!!!!
+    abort() was called at PC 0x420c849b on core 0
+
+WiFi and BLE share one radio here, and coexistence requires the WiFi side to
+keep sleeping so the BLE side gets airtime. Turning modem sleep off is not
+"less power saving", it is an abort. And there is no way around it by
+shutting BLE down for the duration: the keyboard is BLE and the sync screen
+needs it to pick a network and type a password.
+
+So modem sleep stays, and the fix for the slow, truncated page is entirely
+the chunked send: with the AP's DTIM period of 1 the station wakes every
+beacon (~102ms), which is a latency to design around, not a stall. Sending
+the page one 1440-byte segment at a time gives each segment its own retry
+budget inside WiFiClient::write(), which is what a body larger than the
+retry budget needed.
+
+Also fixed the teardown order. `pinClockForRadio(false)` ran *before*
+`WiFi.mode(WIFI_OFF)`, so the radio was being torn down with 10MHz DFS and
+light sleep already back on, and it did not always finish:
+"E wifi:timeout when WiFi un-init, type=4". The clock is handed back last now.
+
+## "Save password?" answering itself
+
+Reported first as "the save screen never appears", then -- the observation
+that cracked it -- as "it appeared briefly and vanished before I could
+save". So the state was being entered correctly all along and something was
+answering it.
+
+Two things make this state different from every other screen in the sync
+flow, and both matter:
+
+1. It is entered by *something finishing* (the connection succeeding), not by
+   the user pressing anything. Whatever is in the input queue at that moment
+   was typed at a different screen -- the Enter that submitted the password,
+   or a keyboard auto-repeat of it -- and Enter on this screen means "yes,
+   save". It answered itself.
+2. The panel takes ~700ms to actually display the question. Any key in that
+   window answers something the user has not read. This device also generates
+   spurious button presses (see the phantom RIGHT section above), and a
+   prompt that can be dismissed before it is visible is where that does the
+   most damage.
+
+Both prompts (SAVE_PROMPT and FORGET_PROMPT, which has the same shape) now go
+through `openPrompt()`: it discards the queued input on entry and ignores
+keys for 900ms, one refresh plus margin.
+
+Separately, and found while reading this path: `usedSavedPassword` and
+`autoConnectAttempted` are statics that outlive a sync session, and neither
+`beginScan()` nor `wifiSyncStart()` reset them. Answering "yes" to
+FORGET_PROMPT rescans, which left `usedSavedPassword` true from the
+auto-connect that had just failed -- and `pollConnection()` only offers to
+save when it is false. Not the bug the user hit (the manual path sets it
+false on the way to the password screen), but it is the same bug one step
+over, so both are reset now.
+
+## Cursor during RUN
+
+Reported as a cursor block permanently stuck to the right of the ghost. The
+terminal draws a cursor at the current position, and a program that repaints
+cells in place leaves that position wherever it last printed.
+
+A cursor means "waiting for you to type", and during RUN nothing is. It is
+now hidden whenever the interpreter has control -- `tbIsRunning()`, set
+around the statement dispatch in tb_bridge, so it covers LIST and CATALOG
+too, not just RUN.
+
+## Pacman: continuous movement, and a ghost that does not pace
+
+Two changes from playing it:
+
+- The player keeps moving in the last direction until a wall, rather than
+  stepping once per key. The arrow now sets a *wanted* direction; each frame
+  adopts it if that way is open and otherwise carries on. This is how the
+  original works and it is what makes it playable at one frame per e-ink
+  refresh -- you steer ahead of time instead of racing the panel.
+- The ghost may not reverse. Chasing on the dominant axis and falling back to
+  random made it pace back and forth between two cells whenever the direct
+  route was blocked, which was visible in the host trace. Refusing a reversal
+  unless it is the only way out of a dead end costs one comparison and turns
+  the pacing into a patrol.

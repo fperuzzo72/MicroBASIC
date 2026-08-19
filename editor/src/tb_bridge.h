@@ -26,3 +26,10 @@ void tbSetup();
 // Returns false if the interpreter reported an error; the error text has
 // already been printed to the terminal by then.
 bool tbExecuteLine(const char* line);
+
+// True while the interpreter has control -- RUN, LIST, CATALOG, any direct
+// statement. The terminal cursor is hidden for the duration: a cursor means
+// "waiting for you to type", and nothing is. It was showing up next to
+// whatever a program printed last, which on a game repainting cells in place
+// meant a block permanently stuck to the sprite.
+bool tbIsRunning();

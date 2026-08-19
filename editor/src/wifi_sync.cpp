@@ -3,6 +3,7 @@
 #include "file_manager.h"
 #include "sd_backup.h"
 #include "web_files_page.h"
+#include "input_handler.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -300,19 +301,34 @@ static void beginScan() {
   strcpy(statusText, "Scanning...");
   networkCount = 0;
   selectedNet = 0;
+  // Rescanning means starting over: whatever the last connection attempt
+  // used no longer describes the next one. Without this, forgetting a
+  // password (which rescans) left usedSavedPassword true from the
+  // auto-connect that had just failed.
+  usedSavedPassword = false;
+  autoConnectAttempted = false;
 
   pinClockForRadio(true);
 
   WiFi.mode(WIFI_STA);
-  // WiFi's own modem power save, which is separate from the CPU's and on by
-  // default. The IDF log made the cost plain: "total sleep time: 65986964 us
-  // / 76529859 us" -- the radio was asleep 86% of the session, so every TCP
-  // round trip waited on the next DTIM beacon (102ms here). That is what made
-  // the file page crawl, and it is why a 9.6KB body could not finish sending
-  // inside WiFiClient::write()'s retry budget and arrived truncated: the HTML
-  // rendered, the script tag at the end did not, so no tab worked and no file
-  // list appeared. Sync is a foreground activity of at most a few minutes.
-  WiFi.setSleep(false);
+
+  // DO NOT call WiFi.setSleep(false) here. WiFi's own modem power save is
+  // separate from the CPU light sleep pinned above, and the IDF log made it
+  // look like the obvious culprit for a slow page ("total sleep time:
+  // 65986964 us / 76529859 us" -- asleep 86% of the session). Turning it off
+  // aborts the firmware:
+  //
+  //     wifi:Set ps type: 0
+  //     E wifi:Error! Should enable WiFi modem sleep when both WiFi and
+  //       Bluetooth are enabled!!!!!!
+  //     abort() was called at PC 0x420c849b on core 0
+  //
+  // On this chip WiFi and BLE share one radio, and coexistence requires the
+  // WiFi side to keep sleeping so the BLE side gets the air. The keyboard is
+  // BLE, and the sync screen needs it, so BLE cannot be shut down for the
+  // duration either. Modem sleep stays; with the AP's DTIM period of 1 the
+  // station wakes every beacon (~102ms here), which is a latency to design
+  // around rather than a stall.
   WiFi.disconnect(true);
 
   // scanNetworks() reports failure immediately rather than through
@@ -451,9 +467,12 @@ static void enterSyncingState() {
 
 static void enterDoneState() {
   stopHttpServer();
-  pinClockForRadio(false);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
+  // Only now hand the clock back. Releasing it first meant the radio was torn
+  // down with 10MHz DFS and light sleep already back on, and the teardown
+  // did not always finish: "E wifi:timeout when WiFi un-init, type=4".
+  pinClockForRadio(false);
 
   syncState = SyncState::DONE;
   doneStartMs = millis();
@@ -468,14 +487,40 @@ static void enterDoneState() {
   DBG_PRINTF("[SYNC] Done — %s\n", statusText);
 }
 
+// The two states that put a *question* on screen. Both are entered by
+// something finishing rather than by the user pressing anything, and both
+// were answering themselves: the user saw "Save password?" appear and vanish
+// before they could read it.
+//
+// Two causes, one guard. Whatever is already in the input queue was typed at
+// a different screen -- the Enter that submitted the password, or a repeat of
+// it -- so it is discarded on entry. And the panel takes ~700ms to actually
+// show the question, so keys are ignored until it has had time to appear;
+// this device also generates spurious button presses (see
+// docs/DEVELOPMENT_LOG.md), and a prompt that can be dismissed before it is
+// visible is exactly where that does the most damage.
+static unsigned long promptOpenedMs = 0;
+static constexpr unsigned long PROMPT_GUARD_MS = 900;
+
+static void openPrompt(SyncState s) {
+  inputDiscardPendingKeys();
+  promptOpenedMs = millis();
+  syncState = s;
+  screenDirty = true;
+}
+
+static bool promptStillSettling() {
+  return millis() - promptOpenedMs < PROMPT_GUARD_MS;
+}
+
 static void pollConnection() {
   if (WiFi.status() == WL_CONNECTED) {
+    DBG_PRINTF("[SYNC] connected, usedSavedPassword=%d\n", (int)usedSavedPassword);
     // If we used a manually entered password, prompt to save first
     if (!usedSavedPassword) {
-      syncState = SyncState::SAVE_PROMPT;
       snprintf(statusText, sizeof(statusText), "%s",
                WiFi.localIP().toString().c_str());
-      screenDirty = true;
+      openPrompt(SyncState::SAVE_PROMPT);
     } else {
       enterSyncingState();
     }
@@ -487,12 +532,11 @@ static void pollConnection() {
     strcpy(statusText, "Connection failed");
 
     if (usedSavedPassword) {
-      syncState = SyncState::FORGET_PROMPT;
+      openPrompt(SyncState::FORGET_PROMPT);
     } else {
       syncState = SyncState::CONNECT_FAILED;
+      screenDirty = true;
     }
-
-    screenDirty = true;
     DBG_PRINTLN("[SYNC] Connection timed out");
   }
 }
@@ -854,6 +898,7 @@ void syncHandleKey(uint8_t keyCode, uint8_t modifiers) {
         selectedNet = (selectedNet - 1 + networkCount) % networkCount;
         screenDirty = true;
       } else if (keyCode == HID_KEY_ENTER && networkCount > 0) {
+        DBG_PRINTF("[SYNC] picked %s\n", networks[selectedNet].ssid);
         // Try saved password first
         char savedPass[MAX_PASSWORD_LEN + 1];
         if (getSavedPassword(networks[selectedNet].ssid, savedPass, sizeof(savedPass))) {
@@ -940,6 +985,9 @@ void syncHandleKey(uint8_t keyCode, uint8_t modifiers) {
       break;
 
     case SyncState::SAVE_PROMPT:
+      DBG_PRINTF("[SYNC] SAVE_PROMPT key=%02x settling=%d\n",
+                 (unsigned)keyCode, (int)promptStillSettling());
+      if (promptStillSettling()) break;
       // Up = Yes (save), Down = No (skip)
       if (keyCode == HID_KEY_UP || keyCode == HID_KEY_ENTER) {
         saveCredential(connectingSSID, passwordBuf);
@@ -951,6 +999,7 @@ void syncHandleKey(uint8_t keyCode, uint8_t modifiers) {
       break;
 
     case SyncState::FORGET_PROMPT:
+      if (promptStillSettling()) break;
       // Up = Yes (forget), Down = No (keep)
       if (keyCode == HID_KEY_UP || keyCode == HID_KEY_ENTER) {
         forgetCredential(connectingSSID);
@@ -973,6 +1022,12 @@ void syncHandleKey(uint8_t keyCode, uint8_t modifiers) {
 void wifiSyncStart() {
   if (syncActive) return;
   syncActive = true;
+  // These are statics that outlive a sync session, and a session can end in
+  // any state -- including one that set them. A stale `usedSavedPassword`
+  // suppresses the "save password?" prompt on the next manual connect, which
+  // is exactly the class of bug being chased here.
+  usedSavedPassword = false;
+  autoConnectAttempted = false;
   wifiPrefs.begin("wifi_creds", false);
   if (!wifiPrefs.isKey("wifi_count")) restoreWifiBackup();
   resetSyncTracking();

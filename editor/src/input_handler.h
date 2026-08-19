@@ -29,3 +29,9 @@ bool inputConsumeBreakPending();
 int inputProgramKeyCount();   // keys waiting -- BASIC's @A
 char inputReadProgramKey();   // next key, or 0 if none -- BASIC's GET / @C
 void inputFlushProgramKeys(); // discard what was typed before the command ran
+
+// Throw away every key still queued. For a screen that appears on its own --
+// a prompt raised by something finishing, not by the user -- everything
+// already in the queue was typed at a different screen and must not be
+// allowed to answer a question that was not on display when it was pressed.
+void inputDiscardPendingKeys();

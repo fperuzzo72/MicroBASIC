@@ -905,6 +905,10 @@ char inputReadProgramKey() {
 // Called before each command is handed to the interpreter, so that whatever
 // was typed *before* RUN isn't waiting to be read as the first move of the
 // game that RUN starts.
+void inputDiscardPendingKeys() {
+  while (!isQueueEmpty()) (void)dequeueKeyEvent();
+}
+
 void inputFlushProgramKeys() {
   progHead = progTail = 0;
   breakPending = false;
