@@ -1920,9 +1920,11 @@ from the dead ends.
   A machine with exactly one way out should answer to whichever word the
   user reaches for.
 - **Boot identification line.** `tbSetup()` prints
-  `MicroBASIC v0.3 for XTeink X4` before calling `basicSetup()`, so it lands
-  above the interpreter's own multi-line greeting: whose computer it is
-  first, which BASIC second -- the order those machines actually used.
+  `FSP MicroBASIC v0.3 for XTeink X4` before calling `basicSetup()`, so it
+  lands above the interpreter's own multi-line greeting: whose computer it is
+  first, which BASIC second -- the order those machines actually used. (The
+  initials were added later, and are the point of the line: these machines
+  announced whose they were.)
 - **Screen output was crawling** (several seconds per printed line from a
   `PRINT`/`GOTO` loop). This was a bug of ours, not the interpreter's, and
   worth writing down because the shape of it is easy to repeat.
