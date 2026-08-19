@@ -223,12 +223,14 @@ void drawMainMenu(GfxRenderer& renderer, HalGPIO& gpio) {
 
   // Menu items (base + dynamically detected OTA apps)
   // "MicroBASIC" (the SCREEN 0-3 terminal) leads the list -- it's the
-  // project's actual identity going forward, not just another tool. "New
-  // Program" (the original prose editor, still just "New Note" under a
-  // new name) is a second, distinct way to write a program's source over
-  // the same file repository -- see MicroBASIC repo's docs/DEVELOPMENT_LOG.md.
-  static const char* baseMenuItems[] = {"MicroBASIC", "Browse Files", "New Program", "Settings", "Sync"};
-  static constexpr int BASE_MENU_COUNT = 5;
+  // project's actual identity going forward, not just another tool. Then two
+  // browse/new pairs, one per collection: BASIC programs under
+  // /MicroBASIC/programs, then the MicroWriter prose side, unchanged. The
+  // order and count here must match input_handler.cpp's MAIN_MENU dispatch --
+  // they are indexed by the same mainMenuSelection.
+  static const char* baseMenuItems[] = {"MicroBASIC", "Browse Programs", "New Program",
+                                        "Browse Files", "New Note", "Settings", "Sync"};
+  static constexpr int BASE_MENU_COUNT = 7;
   int menuCount = BASE_MENU_COUNT + otaAppCount;
 
   // lineH covers FONT_UI's full glyph extent (ascender+descender, ~35px)
