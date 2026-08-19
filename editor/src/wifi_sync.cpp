@@ -10,6 +10,8 @@
 #include <ESPmDNS.h>
 #include <SDCardManager.h>
 #include <Preferences.h>
+#include <esp_pm.h>
+#include <esp_heap_caps.h>
 
 // --- Internal state ---
 static WebServer* server = nullptr;
@@ -270,14 +272,52 @@ static void forgetCredential(const char* ssid) {
 // WiFi scanning
 // =========================================================================
 
+// Automatic light sleep and 10-80MHz DFS are on for the whole firmware (see
+// main.cpp), and they are not free for the radio: a scan is a timed sequence
+// of channel hops, and a core that may drop to 10MHz or sleep between them
+// is the wrong place to run one. This pins the clock for as long as the sync
+// screen is open and hands it back on the way out, so the cost is paid only
+// while the user is actually looking at a WiFi screen.
+static bool pmPinned = false;
+
+static void pinClockForRadio(bool pin) {
+  if (pin == pmPinned) return;
+  esp_pm_config_esp32c3_t cfg = {
+    .max_freq_mhz = 80,
+    .min_freq_mhz = pin ? 80 : 10,
+    .light_sleep_enable = !pin,
+  };
+  const esp_err_t err = esp_pm_configure(&cfg);
+  if (err == ESP_OK) pmPinned = pin;
+  DBG_PRINTF("[SYNC] PM %s: %s\n", pin ? "pinned" : "released", esp_err_to_name(err));
+}
+
 static void beginScan() {
   syncState = SyncState::SCANNING;
   strcpy(statusText, "Scanning...");
   networkCount = 0;
   selectedNet = 0;
+
+  pinClockForRadio(true);
+
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
-  WiFi.scanNetworks(true);  // async scan
+
+  // scanNetworks() reports failure immediately rather than through
+  // scanComplete(), and the two failures look identical on screen otherwise.
+  // Worth distinguishing: this device has run out of contiguous heap before
+  // (BLE needed 20KB and could not get it), and bringing up the WiFi stack
+  // is the other large allocation in this firmware.
+  const int16_t started = WiFi.scanNetworks(true);
+  DBG_PRINTF("[SYNC] scan start=%d heap=%u largest=%u\n", (int)started,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  if (started == WIFI_SCAN_FAILED) {
+    syncState = SyncState::NETWORK_LIST;
+    snprintf(statusText, sizeof(statusText), "Radio busy (heap %uK)",
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+  }
+
   screenDirty = true;
   DBG_PRINTLN("[SYNC] WiFi scan started");
 }
@@ -290,7 +330,8 @@ static void processScanResults() {
     // Scan failed or no networks found
     networkCount = 0;
     syncState = SyncState::NETWORK_LIST;
-    strcpy(statusText, n == 0 ? "No networks found" : "Scan failed");
+    snprintf(statusText, sizeof(statusText), "%s",
+             n == 0 ? "No networks found" : "Scan failed");
     WiFi.scanDelete();
     screenDirty = true;
     return;
@@ -398,6 +439,7 @@ static void enterSyncingState() {
 
 static void enterDoneState() {
   stopHttpServer();
+  pinClockForRadio(false);
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
 

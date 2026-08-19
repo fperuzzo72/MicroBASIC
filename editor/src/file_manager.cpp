@@ -4,6 +4,26 @@
 #include <SDCardManager.h>
 #include <cstring>
 
+// --- Collections (see file_manager.h) ---
+struct CollectionInfo {
+  const char* dir;
+  const char* ext;      // extension given to files created here
+  const char* fallback; // base name when a title sanitises down to nothing
+  const char* label;
+  bool extFilter;       // list only *ext, or everything the folder holds
+};
+
+// Programs are listed unfiltered on purpose: BASIC's SAVE stores under
+// exactly the name typed, with no extension forced on, so a folder of
+// perfectly good programs can contain no .bas at all.
+static const CollectionInfo COLLECTIONS[] = {
+  {"/notes",               ".txt", "note",    "Notes",    true},
+  {"/MicroBASIC/programs", ".bas", "program", "Programs", false},
+};
+
+static FileCollection currentCollection = FileCollection::NOTES;
+static const CollectionInfo& coll() { return COLLECTIONS[(int)currentCollection]; }
+
 // --- File list ---
 static FileInfo fileList[MAX_FILES];
 static int fileCount = 0;
@@ -32,9 +52,11 @@ static void filenameToTitle(const char* filename, char* out, int maxLen) {
 }
 
 // Convert a title to a valid FAT filename (lowercase, spaces->underscores,
-// non-alphanumeric stripped, ".txt" appended).
+// non-alphanumeric stripped, the collection's extension appended).
 static void titleToFilename(const char* title, char* out, int maxLen) {
-  int maxBase = maxLen - 5; // room for ".txt" + null
+  const CollectionInfo& c = coll();
+  const int extLen = (int)strlen(c.ext);
+  int maxBase = maxLen - extLen - 1;
   int j = 0;
   for (int i = 0; title[i] != '\0' && j < maxBase; i++) {
     char c = title[i];
@@ -46,29 +68,41 @@ static void titleToFilename(const char* title, char* out, int maxLen) {
     }
   }
   while (j > 0 && out[j - 1] == '_') j--;
-  if (j == 0) { strncpy(out, "note", maxLen - 1); j = 4; }
-  strcpy(out + j, ".txt");
+  if (j == 0) { strncpy(out, c.fallback, maxLen - 1); j = (int)strlen(out); }
+  strcpy(out + j, c.ext);
 }
 
-// Derive a unique /notes/ filename from a title, handling collisions with _2, _3 suffix.
+// Derive a unique filename in the current collection from a title, handling
+// collisions with a _2, _3 suffix.
 void deriveUniqueFilename(const char* title, char* out, int maxLen) {
   titleToFilename(title, out, maxLen);
 
   char path[320];
-  snprintf(path, sizeof(path), "/notes/%s", out);
+  snprintf(path, sizeof(path), "%s/%s", coll().dir, out);
   if (!SdMan.exists(path)) return;
 
   // Collision — strip .txt, try _2, _3 ...
   char base[MAX_FILENAME_LEN];
   strncpy(base, out, maxLen - 1);
-  base[strlen(base) - 4] = '\0';
+  base[maxLen - 1] = '\0';
+  const size_t extLen = strlen(coll().ext);
+  if (strlen(base) > extLen) base[strlen(base) - extLen] = '\0';
 
   int suffix = 2;
   while (SdMan.exists(path) && suffix <= 99) {
-    snprintf(out, maxLen, "%s_%d.txt", base, suffix++);
-    snprintf(path, sizeof(path), "/notes/%s", out);
+    snprintf(out, maxLen, "%s_%d%s", base, suffix++, coll().ext);
+    snprintf(path, sizeof(path), "%s/%s", coll().dir, out);
   }
 }
+
+void setFileCollection(FileCollection c) {
+  if (currentCollection == c) return;
+  currentCollection = c;
+  refreshFileList();
+}
+
+FileCollection getFileCollection() { return currentCollection; }
+const char* fileCollectionName() { return coll().label; }
 
 void fileManagerSetup() {
   if (!SdMan.begin()) {
@@ -76,8 +110,8 @@ void fileManagerSetup() {
     return;
   }
 
-  if (!SdMan.exists("/notes")) {
-    SdMan.mkdir("/notes");
+  for (const CollectionInfo& c : COLLECTIONS) {
+    if (!SdMan.exists(c.dir)) SdMan.mkdir(c.dir);
   }
 
   DBG_PRINTLN("SD Card initialized");
@@ -87,7 +121,7 @@ void fileManagerSetup() {
 void refreshFileList() {
   fileCount = 0;
 
-  auto root = SdMan.open("/notes");
+  auto root = SdMan.open(coll().dir);
   if (!root || !root.isDirectory()) {
     if (root) root.close();
     return;
@@ -104,8 +138,14 @@ void refreshFileList() {
       continue;
     }
 
-    int nameLen = strlen(name);
-    if (nameLen > 4 && strcasecmp(name + nameLen - 4, ".txt") == 0) {
+    // The save path writes .tmp and rotates the previous version to .bak;
+    // neither is a document, so neither belongs in a list the user picks from.
+    const int nameLen = strlen(name);
+    const bool scratch = nameLen > 4 && (strcasecmp(name + nameLen - 4, ".bak") == 0 ||
+                                         strcasecmp(name + nameLen - 4, ".tmp") == 0);
+    const bool matches = !coll().extFilter ||
+                         (nameLen > 4 && strcasecmp(name + nameLen - 4, coll().ext) == 0);
+    if (!scratch && matches) {
       strncpy(fileList[fileCount].filename, name, MAX_FILENAME_LEN - 1);
       fileList[fileCount].filename[MAX_FILENAME_LEN - 1] = '\0';
 
@@ -126,7 +166,7 @@ FileInfo* getFileList() { return fileList; }
 
 void loadFile(const char* filename) {
   char path[320];
-  snprintf(path, sizeof(path), "/notes/%s", filename);
+  snprintf(path, sizeof(path), "%s/%s", coll().dir, filename);
 
   auto file = SdMan.open(path, O_RDONLY);
   if (!file) {
@@ -163,7 +203,7 @@ void saveCurrentFile(bool refreshList) {
   if (filename[0] == '\0') return;
 
   char path[320], tmpPath[336], bakPath[336];
-  snprintf(path, sizeof(path), "/notes/%s", filename);
+  snprintf(path, sizeof(path), "%s/%s", coll().dir, filename);
   snprintf(tmpPath, sizeof(tmpPath), "%s.tmp", path);
   snprintf(bakPath, sizeof(bakPath), "%s.bak", path);
 
@@ -214,8 +254,8 @@ void updateFileTitle(const char* filename, const char* newTitle) {
 
   if (strcmp(newFilename, filename) != 0) {
     char oldPath[320], newPath[320];
-    snprintf(oldPath, sizeof(oldPath), "/notes/%s", filename);
-    snprintf(newPath, sizeof(newPath), "/notes/%s", newFilename);
+    snprintf(oldPath, sizeof(oldPath), "%s/%s", coll().dir, filename);
+    snprintf(newPath, sizeof(newPath), "%s/%s", coll().dir, newFilename);
     SdMan.rename(oldPath, newPath);
 
     if (strcmp(editorGetCurrentFile(), filename) == 0) {
@@ -229,7 +269,7 @@ void updateFileTitle(const char* filename, const char* newTitle) {
 
 void deleteFile(const char* filename) {
   char path[320], bakPath[336];
-  snprintf(path, sizeof(path), "/notes/%s", filename);
+  snprintf(path, sizeof(path), "%s/%s", coll().dir, filename);
   snprintf(bakPath, sizeof(bakPath), "%s.bak", path);
   SdMan.remove(path);
   SdMan.remove(bakPath);

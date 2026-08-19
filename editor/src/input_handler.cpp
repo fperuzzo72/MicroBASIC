@@ -515,10 +515,10 @@ static void executeLogicalLine(const char* line) {
     vcOpen();
     return;
   }
-  if (isWord("FILES")) {
-    // Alias: the interpreter calls its directory listing CATALOG. Keeping
-    // FILES working costs one line and it's the name this project has used
-    // since before the interpreter existed.
+  if (isWord("FILES") || isWord("DIR")) {
+    // Aliases: the interpreter calls its directory listing CATALOG. FILES is
+    // the name this project used before the interpreter existed, DIR the one
+    // anyone arriving from CP/M or DOS reaches for first. Both cost a word.
     screenEditorStartNewInputLine();
     tbExecuteLine("CATALOG");
     // Same rule as the interpreter path below: only break the line if it was
@@ -705,10 +705,10 @@ static void dispatchEvent(const KeyEvent& event) {
 
   switch (currentState) {
     case UIState::MAIN_MENU: {
-      // Base items: Browse Files, Screen Editor, New Program, Settings,
-      // Sync -- keep in sync with ui_renderer.cpp's baseMenuItems[] /
-      // BASE_MENU_COUNT.
-      constexpr int BASE_MENU_COUNT = 5;
+      // MicroBASIC, Browse Programs, New Program, Browse Files, New Note,
+      // Settings, Sync -- keep in sync with ui_renderer.cpp's
+      // baseMenuItems[] / BASE_MENU_COUNT.
+      constexpr int BASE_MENU_COUNT = 7;
       int menuCount = BASE_MENU_COUNT + otaAppCount;
       if (event.keyCode == HID_KEY_DOWN) {
         mainMenuSelection = (mainMenuSelection + 1) % menuCount;
@@ -726,20 +726,29 @@ static void dispatchEvent(const KeyEvent& event) {
           applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
           currentState = UIState::SCREEN_EDITOR;
           screenDirty = true;
-        } else if (mainMenuSelection == 1) {
+        } else if (mainMenuSelection == 1 || mainMenuSelection == 3) {
+          // Browse Programs / Browse Files. Same browser, same editor: the
+          // only difference is which collection they are pointed at, and
+          // that is decided here rather than inside either screen.
+          setFileCollection(mainMenuSelection == 1 ? FileCollection::PROGRAMS
+                                                   : FileCollection::NOTES);
           refreshFileList();
+          selectedFileIndex = 0;
           currentState = UIState::FILE_BROWSER;
           screenDirty = true;
-        } else if (mainMenuSelection == 2) {
-          // "New Program" -- the original prose editor ("New Note"),
-          // renamed: a second, free-form way to write a program's source,
-          // alongside the grid-faithful Screen Editor.
+        } else if (mainMenuSelection == 2 || mainMenuSelection == 4) {
+          // New Program / New Note -- the same prose editor, saving into
+          // whichever folder was just selected. A program written here lands
+          // in /MicroBASIC/programs, so LOAD finds it; a note lands in the
+          // folder MicroWriter has always used.
+          setFileCollection(mainMenuSelection == 2 ? FileCollection::PROGRAMS
+                                                   : FileCollection::NOTES);
           createNewFile();
           openTitleEdit("Untitled", UIState::TEXT_EDITOR);
-        } else if (mainMenuSelection == 3) {
+        } else if (mainMenuSelection == 5) {
           currentState = UIState::SETTINGS;
           screenDirty = true;
-        } else if (mainMenuSelection == 4) {
+        } else if (mainMenuSelection == 6) {
           wifiSyncStart();
           currentState = UIState::WIFI_SYNC;
           screenDirty = true;
@@ -969,15 +978,87 @@ static void dispatchEvent(const KeyEvent& event) {
   }
 }
 
-bool inputConsumeBreakPending() {
-  bool sawBreak = false;
+// --- Keyboard for a RUNning program -------------------------------------
+//
+// While a program runs, loopTask is inside the interpreter and nothing calls
+// processAllInput(), so the normal editor dispatch is not running. The queue
+// still fills, though (BLE delivers from its own task), and the interpreter
+// polls the runtime after every statement. These few functions are what that
+// poll drains into: break requests on one side, ordinary keystrokes on the
+// other, so a program can both be stopped AND read the keyboard.
+//
+// The ring is small on purpose. A game wants the key that is being held down
+// now, not a backlog of everything pressed while it was busy repainting, so
+// when it fills the newest key is dropped rather than the oldest read.
+
+static char progKeys[16];
+static uint8_t progHead = 0;
+static uint8_t progTail = 0;
+static bool breakPending = false;
+
+static constexpr uint8_t PROG_KEYS_SIZE = (uint8_t)sizeof(progKeys);
+
+// Both inputConsumeBreakPending() and the GET path call this, because the
+// interpreter reaches them at different moments and whichever runs first has
+// to be the one that empties the hardware queue.
+static void pumpProgramInput() {
   while (!isQueueEmpty()) {
     KeyEvent event = dequeueKeyEvent();
     if (!event.pressed) continue;
-    if (event.keyCode == HID_KEY_ESCAPE) sawBreak = true;
-    if (event.keyCode == HID_KEY_C && isCtrl(event.modifiers)) sawBreak = true;
+
+    if (event.keyCode == HID_KEY_ESCAPE ||
+        (event.keyCode == HID_KEY_C && isCtrl(event.modifiers))) {
+      breakPending = true;
+      continue;  // a break is not also a character
+    }
+
+    char c = hidToAscii(event.keyCode, event.modifiers);
+    if (c == 0) {
+      // Arrow keys have no ASCII, and a program that reads the keyboard at
+      // all almost certainly wants them. These are the MSX codes, which is
+      // the machine this environment's SCREEN modes and editing model follow.
+      switch (event.keyCode) {
+        case HID_KEY_RIGHT: c = 28; break;
+        case HID_KEY_LEFT:  c = 29; break;
+        case HID_KEY_UP:    c = 30; break;
+        case HID_KEY_DOWN:  c = 31; break;
+        default: continue;
+      }
+    }
+
+    const uint8_t next = (uint8_t)((progHead + 1) % PROG_KEYS_SIZE);
+    if (next == progTail) continue;  // full: drop the newest, see above
+    progKeys[progHead] = c;
+    progHead = next;
   }
+}
+
+bool inputConsumeBreakPending() {
+  pumpProgramInput();
+  const bool sawBreak = breakPending;
+  breakPending = false;
   return sawBreak;
+}
+
+int inputProgramKeyCount() {
+  pumpProgramInput();
+  return (progHead + PROG_KEYS_SIZE - progTail) % PROG_KEYS_SIZE;
+}
+
+char inputReadProgramKey() {
+  pumpProgramInput();
+  if (progHead == progTail) return 0;
+  const char c = progKeys[progTail];
+  progTail = (uint8_t)((progTail + 1) % PROG_KEYS_SIZE);
+  return c;
+}
+
+// Called before each command is handed to the interpreter, so that whatever
+// was typed *before* RUN isn't waiting to be read as the first move of the
+// game that RUN starts.
+void inputFlushProgramKeys() {
+  progHead = progTail = 0;
+  breakPending = false;
 }
 
 int processAllInput() {

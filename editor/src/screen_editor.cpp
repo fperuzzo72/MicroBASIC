@@ -115,6 +115,16 @@ void screenEditorMoveCursor(int dRow, int dCol) {
 
 void screenEditorGoHome() { cursorCol = 0; }
 
+// Absolute placement, for the interpreter's LOCATE (decoded from VT52 in
+// tb_runtime.cpp's outch). Deliberately leaves the continuation flags alone,
+// exactly as screenEditorMoveCursor does: jumping the cursor says where to
+// print next, not that the rows it lands between stopped belonging together.
+void screenEditorSetCursor(int row, int col) {
+  cursorRow = row;
+  cursorCol = col;
+  clampCursor();
+}
+
 void screenEditorGoEnd() {
   int cols = screenEditorCols();
   int last = -1;

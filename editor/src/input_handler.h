@@ -19,3 +19,13 @@ char hidToAscii(uint8_t hid, uint8_t modifiers);
 // queued event by processPhysicalButtons(), which runs from loop() and is
 // itself blocked for the same reason RUN needed this escape hatch.
 bool inputConsumeBreakPending();
+
+// Keyboard for a RUNning program, behind the runtime's availch()/inch() and
+// so behind BASIC's GET statement and its @A / @C special variables. Ordinary
+// keystrokes that the break drain used to throw away are now queued here
+// instead; arrow keys arrive as the MSX codes 28/29/30/31 (right/left/up/
+// down). All three share one drain of the hardware queue, so calling any of
+// them also collects any pending break.
+int inputProgramKeyCount();   // keys waiting -- BASIC's @A
+char inputReadProgramKey();   // next key, or 0 if none -- BASIC's GET / @C
+void inputFlushProgramKeys(); // discard what was typed before the command ran

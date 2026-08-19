@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "screen_editor.h"
+#include "input_handler.h"
 
 extern bool screenDirty;
 
@@ -39,6 +40,12 @@ bool tbExecuteLine(const char* line) {
   // From here down this mirrors basicLoop() after its ins() call. Deliberately
   // kept in the same order and with the same assignments, so that when
   // upstream changes its REPL this is easy to diff against.
+  // Whatever was typed before this command was typed at the editor, not at
+  // the program this command may be about to start. Without this, pressing a
+  // key while the previous RUN was busy would be delivered as the first move
+  // of the next one.
+  inputFlushProgramKeys();
+
   iodefaults();
   form = 0;
 

@@ -1952,3 +1952,110 @@ from the dead ends.
   `byield()` does a `vTaskDelay(1)`, which is what keeps the watchdog fed.
   Tying the yield to the flush interval was the other tempting shape here,
   and it would have reintroduced the freeze the flush is unrelated to.
+
+## Round five: keyboard input, LOCATE, and a game to test with
+
+The user asked for "a definitive test": one BASIC program that exercises
+everything at once. Writing it turned up two things the environment could
+not do yet, both of which are the difference between a language you can
+compute with and one you can write a screen program in.
+
+- **The keyboard was unreachable from BASIC.** `availch()`/`inch()` returned
+  0, so `GET`, `@A` and `@C` were all dead. The keys were being *thrown away*
+  on purpose: `inputConsumeBreakPending()` drained the whole queue looking
+  for Escape or Ctrl+C and discarded everything else, because until now the
+  only reason to look at the queue during a RUN was to stop the program.
+  It now sorts instead of discards -- breaks on one side, a small ring of
+  characters on the other -- and the runtime's `availch()`/`inch()` read that
+  ring. Arrow keys have no ASCII, so they arrive as the MSX codes 28/29/30/31
+  (right/left/up/down), matching the machine this environment's SCREEN modes
+  already follow.
+
+  The ring holds 16 and drops the *newest* key when full. A game wants the
+  key being held down now, not a backlog of everything pressed while it was
+  repainting.
+
+- **LOCATE printed garbage.** It is not a runtime call upstream: `xlocate()`
+  implements it by writing a VT52 `ESC Y row col` sequence through `outch()`,
+  and a runtime that doesn't decode that prints four stray characters. A
+  four-state decoder in `outch()` fixes it, and it is what makes
+  screen-oriented BASIC possible here at all -- a program can repaint the
+  cells that changed instead of scrolling, which given a ~700ms panel refresh
+  is the difference between a game and a listing. Both operands are 1-based
+  and biased by 32, so `LOCATE 1,1` is the top-left cell, and the argument
+  order is column-then-row, as MSX had it. Any other escape sequence is
+  swallowed rather than printed.
+
+- **Break is now announced.** The interpreter's break path is silent -- it
+  stops and returns to the prompt -- which on a screen already full of a
+  program's output leaves nothing to distinguish "I stopped it" from "it
+  finished". `checkch()` now prints `Break in <line>` before returning
+  BREAKCHAR, which has to happen there rather than after the fact: `st` still
+  says a program is running, so the line number is still recoverable.
+
+- **`DIR`** joins `FILES` as an alias for the interpreter's `CATALOG`.
+
+- **`examples/pacman.bas`** is the test program: an 11x21 maze in DATA, a
+  player, a chasing ghost, pellets and a score, in about 90 lines. It uses
+  `DIM`/substring read *and* write as a maze buffer (this BASIC's strings are
+  in-place, so `M$(P,P)` is both the getter and the setter, and there are no
+  string arrays), `READ`/`DATA`, `GOSUB`, `GET`, `LOCATE`, `@T` for frame
+  timing, `RND`/`INT`/`ABS`/`SGN`, and `AND` in conditions. The logic was
+  validated on the host REPL harness before it ever reached the device, with
+  `GET` replaced by scripted moves and the VT52 output read back as ANSI.
+
+  One thing it cannot do: call `SCREEN`. That command is the firmware's, not
+  the interpreter's, so it only works typed at the prompt -- the program says
+  so in a REM. Making it available to programs would mean adding a token to
+  the interpreter, which is a patch, not an integration.
+
+### HELP <command>
+
+Reported as printing only the command name. That is upstream's own stub:
+`xhelp()` prints the token and `": "` and nothing else -- the per-command
+help texts were never written. Not an integration problem. Adding them would
+mean a string table for ~150 keywords in flash.
+
+## Menu: two collections instead of one
+
+The prose editor was reachable as "New Program", which was wrong in both
+directions: it writes prose into the notes folder, and there was no way to
+get at `/MicroBASIC/programs` from the UI at all. The menu now carries both
+pairs -- `Browse Programs` / `New Program` over `/MicroBASIC/programs`,
+`Browse Files` / `New Note` over the notes folder, as MicroWriter had them.
+
+The browser and the editor are unchanged; what moved is *where they look*.
+`file_manager` gained a collection descriptor (folder, extension, fallback
+base name, label, whether to filter by extension) and the menu picks one
+before entering either screen. Programs are listed unfiltered on purpose:
+BASIC's SAVE stores under exactly the name typed with no extension forced
+on, so a folder of perfectly good programs can contain no `.bas` at all.
+`.tmp` and `.bak`, which the save path creates, are excluded from both.
+
+This closes the loop the SD layout was always aiming at: a program written
+in the prose editor lands where `LOAD` looks for it, and one typed at the
+BASIC prompt can be opened in the editor.
+
+## WiFi scan failing
+
+Reported: Sync errors out scanning for networks. The scan code is unchanged
+from MicroWriter, where it works, so the difference is the environment
+around it. Two candidates, and the fix addresses the first while making the
+second visible:
+
+1. **Power management.** This firmware runs automatic light sleep with
+   10-80MHz DFS. A scan is a timed sequence of channel hops; a core that may
+   drop to 10MHz or sleep between them is the wrong place to run one.
+   `wifiSyncStart()` now pins the clock at 80MHz with light sleep off for as
+   long as the sync screen is open, and hands it back on the way out. (This
+   is the same power configuration implicated in the phantom-RIGHT bug
+   above, which is worth noting: it is now suspect in two places.)
+
+2. **Contiguous heap.** Bringing up the WiFi stack is a large allocation, and
+   this device has run out of contiguous heap before -- BLE needed 20KB and
+   the largest free block was 8704. `scanNetworks()` reports that kind of
+   failure immediately, through its own return value, rather than through
+   `scanComplete()`, and both used to surface as the same "Scan failed".
+   They are now distinguished, and the failure message carries the largest
+   free block so the cause is readable off the screen rather than needing a
+   serial cable.

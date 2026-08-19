@@ -182,7 +182,31 @@ number to keep watching.
       interpreter's greeting.
 - [ ] Ctrl+C / Esc still break a running loop (the yield path changed).
 
-## 8. Regression check
+## 8. Round five: keyboard, LOCATE, menus, sync
+
+- [ ] `Break in <line>` is printed when Escape or Ctrl+C stops a program.
+- [ ] `DIR` lists the SD card exactly as `FILES` and `CATALOG` do.
+- [ ] `10 LOCATE 5,3` then `20 PRINT "X";` puts the X at column 5, row 3 --
+      no stray characters anywhere.
+- [ ] `10 GET K` / `20 IF K=0 THEN GOTO 10` / `30 PRINT K` reports the key
+      code; arrows give 28/29/30/31 (right/left/up/down).
+- [ ] `examples/pacman.bas`: type `SCREEN 1`, then `RUN`. The maze draws, the
+      arrows move the player, the ghost chases, the score counts up. This is
+      the speed test -- how playable it feels is the answer.
+      Upload it through Sync's Programs tab, or use `VC` after uploading.
+- [ ] Main menu: seven entries -- MicroBASIC, Browse Programs, New Program,
+      Browse Files, New Note, Settings, Sync -- plus the OTA apps.
+- [ ] `Browse Programs` lists `/MicroBASIC/programs` and its header says
+      "Programs"; `Browse Files` lists the notes folder and says "Notes".
+- [ ] `New Program` saves into `/MicroBASIC/programs` as `<title>.bas`, and
+      `LOAD "<title>.bas"` at the BASIC prompt finds it.
+- [ ] `New Note` still saves into the notes folder as before.
+- [ ] Neither listing shows `.tmp` or `.bak` files.
+- [ ] Sync scans for networks. If it still fails, the message now says which
+      failure it was -- "Radio busy (heap NNK)" means the WiFi stack could
+      not allocate, "Scan failed" means the radio returned nothing.
+
+## 9. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).

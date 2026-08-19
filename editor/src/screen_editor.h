@@ -38,6 +38,7 @@ int screenEditorGetCursorCol();
 // continuation.
 void screenEditorMoveCursor(int dRow, int dCol);
 void screenEditorGoHome();      // column 0 of the current row
+void screenEditorSetCursor(int row, int col);  // absolute, clamped; LOCATE
 void screenEditorGoEnd();       // just past the last non-blank column of the current row
 void screenEditorGoFirstRow();  // PgUp
 void screenEditorGoLastRow();   // PgDn

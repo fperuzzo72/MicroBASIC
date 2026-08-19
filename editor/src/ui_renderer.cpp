@@ -276,7 +276,9 @@ void drawFileBrowser(GfxRenderer& renderer, HalGPIO& gpio) {
   if (darkMode) clippedFillRect(renderer, 0, 0, sw, sh, true);
 
   // Header
-  drawClippedText(renderer, FONT_SMALL, 10, 5, "Notes", 0, tc, EpdFontFamily::BOLD);
+  // "Notes" / "Programs" -- the browser is now used for both, and which one
+  // you are in is not otherwise visible from a list of filenames.
+  drawClippedText(renderer, FONT_SMALL, 10, 5, fileCollectionName(), 0, tc, EpdFontFamily::BOLD);
   drawBattery(renderer, gpio);
   clippedLine(renderer, 5, 32, sw - 5, 32, tc);
 

@@ -69,6 +69,11 @@ static char rootNameBuf[MAX_FILENAME_LEN];
 // unchanged screen isn't refreshed. Defined next to byield().
 static bool termDirty;
 
+// Partial VT52 escape sequence, see outch().
+enum : uint8_t { VT_NONE, VT_ESC, VT_ROW, VT_COL };
+static uint8_t vtState = VT_NONE;
+static int vtRow = 0;
+
 // ---------------------------------------------------------------------------
 // Console I/O -> the SCREEN 0-3 terminal
 // ---------------------------------------------------------------------------
@@ -93,6 +98,35 @@ void outch(char c) {
   if (od != OSERIAL) return;  // printer, wire, radio, MQTT: nothing attached
   termDirty = true;
 
+  // LOCATE is not a runtime call upstream: xlocate() implements it by writing
+  // a VT52 "ESC Y row col" sequence through outch(). A runtime that doesn't
+  // decode that gets four stray characters printed instead of a cursor move,
+  // which is what happened before this. Decoding this one sequence is what
+  // makes screen-oriented BASIC possible here -- a program can repaint in
+  // place instead of scrolling, which on e-ink is the difference between a
+  // game and a listing. Both operands are biased by 32 and 1-based, so
+  // LOCATE 1,1 is the top-left cell.
+  if (vtState != VT_NONE) {
+    switch (vtState) {
+      case VT_ESC:
+        // Only cursor addressing is decoded. Anything else is swallowed
+        // rather than printed: a stray escape is never something the user
+        // meant to see on a character grid.
+        vtState = (c == 'Y') ? VT_ROW : VT_NONE;
+        return;
+      case VT_ROW:
+        vtRow = (int)(unsigned char)c - 32;
+        vtState = VT_COL;
+        return;
+      default:
+        screenEditorSetCursor(vtRow, (int)(unsigned char)c - 32);
+        charcount[OSERIAL] = (uint8_t)screenEditorGetCursorCol();
+        vtState = VT_NONE;
+        return;
+    }
+  }
+  if (c == 27) { vtState = VT_ESC; return; }
+
   if (c == '\r') return;  // terminal treats '\n' alone as end of line
   if (c == '\n') {
     screenEditorStartNewInputLine();
@@ -116,11 +150,13 @@ void outs(char* s, uint16_t l) {
   for (uint16_t i = 0; i < l; i++) outch(s[i]);
 }
 
-// Never reached for normal input: complete lines are injected into the
-// interpreter's buffer by tb_bridge.cpp, so nothing pulls characters through
-// here. INPUT is the one statement that would, and it does not work yet --
-// see docs/HARDWARE_TESTS.md.
-char inch() { return 0; }
+// Single-key input. Not used for typing whole lines -- those are injected
+// into the interpreter's buffer by tb_bridge.cpp -- but it is exactly what
+// BASIC's GET statement and its @C special variable read, and those are how a
+// program polls the keyboard without stopping. Non-blocking by design: GET
+// stores 0 when nothing was pressed, which is what lets a game loop keep
+// running while nobody is touching the keys.
+char inch() { return inputReadProgramKey(); }
 
 // The interpreter checks this after *every* statement while a program runs,
 // and treats BREAKCHAR as "stop". That's the natural place to hook this
@@ -132,10 +168,27 @@ char inch() { return 0; }
 // injected whole into the interpreter's buffer by tb_bridge.cpp, so checkch()
 // is only ever reached on the break path.
 char checkch() {
-  return inputConsumeBreakPending() ? BREAKCHAR : 0;
+  if (!inputConsumeBreakPending()) return 0;
+
+  // Announce it. The interpreter's own break path is silent -- it just stops
+  // and returns to the prompt -- which on a screen that is already full of a
+  // program's output leaves nothing to distinguish "I stopped it" from "it
+  // finished". Printing here rather than after tbExecuteLine() returns is
+  // deliberate: `st` still says a program is running, so the line number is
+  // still recoverable, and it is gone by the time the bridge sees it.
+  if (charcount[OSERIAL] != 0) outch('\n');
+  outsc("Break");
+  if (st != SINT) {
+    outsc(" in ");
+    outnumber(myline(here));
+  }
+  outch('\n');
+
+  return BREAKCHAR;
 }
 
-uint16_t availch() { return 0; }
+// BASIC's @A. Also what GET tests before calling inch().
+uint16_t availch() { return (uint16_t)inputProgramKeyCount(); }
 
 // Reads one line. This is where this firmware's own screen editor has to take
 // over from the interpreter's: upstream's version drives its console directly,
