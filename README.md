@@ -190,13 +190,16 @@ d-pad + power button, BLE 5.0, SD card. Same target as MicroWriter.
   `examples/pacman.bas` has to ask for `SCREEN 1` in a REM. Making it
   available to programs means adding a token to the interpreter, which is a
   patch rather than an integration.
-- The **phantom button presses** documented in the development log: the
-  d-pad registers presses nobody made, worse since the interpreter landed,
-  and reproducible on a second X4 and on stock MicroSlate but never on the
-  readers. The leading hypothesis is the shared-ADC button ladder being read
-  during a DFS frequency transition — the readers never call
-  `esp_pm_configure`, we do. The decisive experiment (pin 80MHz, light sleep
-  off) is written up there and has not been run.
+- The **phantom RIGHT presses** documented in the development log: the d-pad
+  registers a RIGHT nobody pressed — which in menus reads as the selection
+  sliding down, since RIGHT moves down and LEFT moves up here — worse since
+  the interpreter landed, and reproducible on a second X4 and on stock
+  MicroSlate but never on the readers. The leading hypothesis is the
+  shared-ADC button ladder being sampled across a DFS frequency transition;
+  RIGHT sits in the ladder's lowest band, so a low-biased reading lands there
+  specifically. The readers never call `esp_pm_configure`, we do. The
+  decisive experiment (pin 80MHz, light sleep off) is written up there and
+  has not been run.
 - `CONT` after a break usually fails with a syntax error. Diagnosed on the
   host harness as an upstream bug, not an integration one; documented in
   [docs/HARDWARE_TESTS.md](docs/HARDWARE_TESTS.md) with the exact mechanism.

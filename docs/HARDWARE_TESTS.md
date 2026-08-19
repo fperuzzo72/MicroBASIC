@@ -255,7 +255,7 @@ number to keep watching.
 
 `-DRELEASE_BUILD` is back on now that the sync flow is confirmed.
 
-## 12. Round nine: INPUT (built, NOT yet flashed)
+## 12. Round nine: INPUT (flashed)
 
 - [ ] `10 INPUT "NOME? ";A$` / `20 PRINT "OI ";A$` -- the prompt appears
       immediately (not after a delay), typing echoes, Enter accepts.
@@ -269,6 +269,11 @@ number to keep watching.
       below the answer.
 - [ ] A long-running program with an INPUT in a loop still repaints and
       does not trip the watchdog.
+
+Free A/B for the phantom RIGHT, costing nothing to try: the sync screen
+pins the CPU at 80MHz with light sleep off for as long as it is open. If
+the spurious presses stop while that screen is up and come back on leaving
+it, the power management is confirmed as the cause.
 
 ## 13. Regression check
 

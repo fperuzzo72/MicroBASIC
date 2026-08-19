@@ -2336,20 +2336,41 @@ The interpreter side was verified on the host harness first -- prompt forms,
 `INPUT "NOME? ";A$`, bare `INPUT A`, numeric conversion -- so what remained
 to be got right on the device was only the runtime half.
 
-**Not flashed yet.** Built clean; the hardware round is deferred.
+Flashed and awaiting the hardware pass; see docs/HARDWARE_TESTS.md section 12.
 
-## Phantom buttons: a down-bias, not just RIGHT
+## Phantom buttons: still RIGHT, and the evidence got sharper
 
-New observation, worth recording because it changes the shape of the bug.
-It now presents as extra *downward* presses: the main menu scrolls past
-Sync down to the reader entries, and the WiFi network list has moved one
-line below the intended network by the time Enter is pressed. Earlier it
-was characterised as a phantom RIGHT.
+An observation that first looked like a new symptom and turned out to be a
+sharper reading of the old one. Reported as extra *downward* movement: the
+main menu scrolling past Sync into the reader entries, and the WiFi network
+list sitting one line below the intended network by the time Enter is
+pressed.
 
-That is consistent with the ADC hypothesis rather than against it -- a
-low-biased reading on a shared resistor ladder lands in whichever band sits
-lowest, and what that band *means* depends on the screen -- but it does say
-the fault is not tied to one button. Also worth noting: the guard now
-protecting the sync prompts (discard queued input, ignore keys for 900ms
-after a screen appears on its own) exists because of exactly this, and is
-the right shape of defence for any screen a spurious press can answer.
+That is the same phantom RIGHT. In this UI the d-pad's RIGHT moves a menu
+selection **down** and LEFT moves it **up** -- so a spurious RIGHT reads as
+a spurious "down", and no other button is implicated. (Recorded because the
+first draft of this section guessed the fault had spread beyond one button.
+It had not; the mapping simply makes one button look like a direction.)
+
+This *strengthens* the ADC hypothesis rather than complicating it. RIGHT
+occupies the extreme low band of the shared resistor ladder (<750 of 4095),
+so a reading biased low lands on RIGHT specifically -- which is exactly what
+a conversion sampled across a DFS frequency transition would produce, since
+the SAR ADC is APB-clock-timed. It also explains why more debounce made it
+*worse*: debounce averages more samples into a window where the clock is
+moving, not fewer.
+
+What it costs is no longer cosmetic: entering Sync took several attempts,
+because the selection kept sliding down to cpr-vcodex before Enter landed.
+
+The decisive experiment is still the one recorded above -- pin
+`min_freq_mhz = max_freq_mhz = 80` and `light_sleep_enable = false`, then
+use the menus normally. Note that the sync screen already does exactly this
+for as long as it is open (`pinClockForRadio`), which makes it a ready-made
+A/B: if the phantom presses stop once the sync screen is up but not before
+it, that is the answer without writing any new code.
+
+The guard now protecting the sync prompts -- discard queued input, ignore
+keys for 900ms after a screen appears on its own -- exists because of this,
+and is the right shape of defence for any screen a spurious press can
+answer. It is a mitigation, not a fix.
