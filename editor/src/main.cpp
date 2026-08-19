@@ -20,6 +20,7 @@
 #include "wifi_sync.h"
 #include "screen_editor.h"
 #include "mb_bridge.h"
+#include "tb_bridge.h"
 
 // Enum for sleep reasons
 enum class SleepReason {
@@ -346,6 +347,7 @@ void setup() {
   screenEditorReset();
   applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
   mbBridgeSetup();
+  tbSetup();  // TinyBasic: direct-mode statements (see tb_bridge.h)
 
   bleSetup();
 

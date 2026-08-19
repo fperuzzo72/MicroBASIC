@@ -7,6 +7,7 @@
 #include "screen_editor.h"
 #include "program_store.h"
 #include "mb_bridge.h"
+#include "tb_bridge.h"
 #include "vc_browser.h"
 
 #include <Arduino.h>
@@ -561,9 +562,12 @@ static void executeLogicalLine(const char* line) {
     return;
   }
 
-  // Not one of ours -- hand the whole line to My-Basic as a direct-mode statement.
+  // Not one of ours -- hand the whole line to the interpreter as a direct-mode
+  // statement. This is the TinyBasic path (tb_bridge.h); numbered lines still
+  // go to program_store above, and RUN still goes through My-Basic, so the two
+  // coexist while the switchover happens one piece at a time.
   screenEditorStartNewInputLine();
-  mbBridgeRunDirect(p);
+  tbExecuteLine(p);
   screenEditorStartNewInputLine();
 }
 

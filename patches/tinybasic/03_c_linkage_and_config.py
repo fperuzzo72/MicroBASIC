@@ -55,12 +55,19 @@ typedef unsigned char byte;
 typedef unsigned long long uint64_t;
 typedef unsigned int uint32_t;"""
 new_types = """/* MicroBASIC: tipos vindos do stdint.h real em vez de declarados a mao --
-   este alvo tem Arduino.h/stdint.h e as declaracoes do upstream colidiam.
+   este alvo tem Arduino.h/stdint.h e as declaracoes do upstream colidiam
+   ("conflicting declaration 'typedef unsigned int uint32_t'").
+
+   `byte` continua sendo declarado aqui, inclusive em C++, e de proposito:
+   runtime.h usa `byte` numa assinatura (mqttcallback) e nao ha garantia de
+   que quem incluir este header ja tenha incluido Arduino.h antes. Como o
+   Arduino define exatamente `typedef uint8_t byte;`, repetir a MESMA typedef
+   e legal em C++ e vale em qualquer ordem de include -- ao contrario de
+   deixar sob #ifndef __cplusplus, que quebrava o segundo .cpp a incluir isto
+   (tb_bridge.cpp: "'byte' has not been declared").
    Ver patches/tinybasic/. */
 #include <stdint.h>
-#ifndef __cplusplus
-typedef unsigned char byte;
-#endif"""
+typedef uint8_t byte;"""
 assert old_types in src, "hardware.h: bloco de typedefs de compatibilidade nao encontrado"
 src = src.replace(old_types, new_types, 1)
 print("hardware.h: typedefs trocados por stdint.h")

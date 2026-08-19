@@ -1,0 +1,28 @@
+#pragma once
+
+// Bridge between the SCREEN 0-3 terminal and Stefan Lenz's IoT BASIC
+// interpreter (editor/lib/TinyBasic, see patches/tinybasic/).
+//
+// The interpreter is written as its own REPL: basicLoop() prints a prompt,
+// *blocks* in ins() until a line arrives, then either stores it (if it starts
+// with a number) or executes it. That shape doesn't fit here -- input on this
+// device arrives asynchronously, keystroke by keystroke, from the BLE host
+// task into a queue, and line editing is the screen editor's job (free cursor
+// movement, wrapped logical lines, Enter reading whichever line the cursor is
+// on).
+//
+// So basicLoop() is not used. tbExecuteLine() instead does exactly what
+// basicLoop() does *after* its ins() call -- inject the finished line into the
+// interpreter's input buffer, tokenise, and dispatch -- which keeps the
+// interpreter's own semantics while leaving line editing entirely to us.
+
+void tbSetup();
+
+// Runs one line as typed, exactly as the interpreter's own REPL would have:
+// a line starting with a number goes to its program memory, anything else
+// executes immediately. Output lands on the terminal through the runtime's
+// outch() (editor/src/tb_runtime.cpp).
+//
+// Returns false if the interpreter reported an error; the error text has
+// already been printed to the terminal by then.
+bool tbExecuteLine(const char* line);
