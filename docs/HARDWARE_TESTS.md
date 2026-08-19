@@ -290,6 +290,16 @@ number to keep watching.
 - [ ] A file operation that genuinely fails now prints the path it tried and
       `card=`/`dir=`, instead of a bare `File Error`.
 
+### Erasing things (reference, not a test)
+
+- `NEW` erases the program **and** the variables. This is the one to use.
+- A line number typed alone erases that line.
+- `CLR` (this interpreter's `CLEAR`) clears variables but leaves one byte of
+  the first one behind -- upstream bug, diagnosed in DEVELOPMENT_LOG.md.
+  Avoid it; `NEW` covers the need.
+- `DELETE "name"` deletes a **file on the SD card**, not a range of program
+  lines as it would on MSX. There is no line-range delete here.
+
 Free A/B for the phantom RIGHT, costing nothing to try: the sync screen
 pins the CPU at 80MHz with light sleep off for as long as it is open. If
 the spurious presses stop while that screen is up and come back on leaving

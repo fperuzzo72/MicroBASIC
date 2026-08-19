@@ -2483,3 +2483,48 @@ this up. `titleToFilename()` walked the title byte by byte and kept only
 set -- vanished entirely: naming a program `ação` in the editor produced
 `aao.bas`. It decodes and folds now, so it produces `acao.bas`. Losing the
 accent is expected; losing the letter was not.
+
+## CLR leaves one byte behind (upstream, diagnosed)
+
+`NEW` erases the program and works correctly. `CLR` -- this interpreter's
+name for what MS-BASIC and MSX called `CLEAR`, clearing variables while
+leaving the program -- does not.
+
+Noticed on the device: `A=5 : CLR : PRINT A` shows 2, but `A=8 : CLR :
+PRINT A` shows 8, unchanged. Not random, and not "sometimes fails". Sampling
+it on the host harness gave:
+
+    A=5   -> 2        A=100 -> 32
+    A=8   -> 8        A=3.5 -> 2
+    A=1   -> 0.5
+
+Those are exactly the values you get by zeroing three of a float's four
+bytes and keeping the one at the *highest address* -- which, little-endian
+on the C3, is the most significant byte. Checked against `struct.pack`, all
+five match to the bit.
+
+The cause is one comparison in upstream's `clrvars()`:
+
+    for (i = himem; i < memsize; i++) memwrite2(i, 0);
+    himem = memsize;
+
+The variable heap grows downward from `memsize`, so the topmost allocated
+object's last byte sits at index `memsize` -- which `i < memsize` excludes.
+Exactly one byte survives, at the top of the heap, which belongs to the
+*first* variable allocated. Everything else clears correctly: a second
+variable reads 0, and strings clear properly. `A=8` looks like it "wasn't
+cleared" only because 8.0 is `41 00 00 00` and its other three bytes were
+already zero.
+
+Not fixed. Same standing decision as the `CONT` bug: upstream behaviour
+stays upstream unless it blocks something. Recorded because the failure is
+quiet and plausible-looking -- a variable that reads 2 after being cleared
+does not announce itself as a bug -- and because whoever finds it next
+should not have to re-derive it. The fix, if it is ever wanted, is `i <=
+memsize`.
+
+`CLEAR` was **not** added as an alias for `CLR`. It was asked for and then
+withdrawn in the same message once this behaviour came to light, and the
+reasoning is worth keeping: an alias would have made a command that does not
+work reachable by a second, more familiar name. `NEW` does what was actually
+wanted.
