@@ -32,6 +32,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "ascii_fold.h"
+
 #include "tb_interp.h"
 
 // ---------------------------------------------------------------------------
@@ -412,6 +414,14 @@ static void tbPath(const char* name, char* out, int outSize) {
       c = '_';
     } else if (c >= 'A' && c <= 'Z') {
       c = (char)(c - 'A' + 'a');
+    } else if ((unsigned char)c >= 0x80) {
+      // Accented characters reach here as single Latin-1 bytes, and SdFat
+      // rejects every byte with the high bit set -- see ascii_fold.h, which
+      // also explains why folding beats enabling UTF-8 names. SAVE and LOAD
+      // share this function, so a folded name is still found by the name that
+      // was typed.
+      const char folded = asciiFold((uint32_t)(unsigned char)c);
+      c = folded ? folded : '_';
     }
     safe[n++] = c;
   }
@@ -424,6 +434,19 @@ static void ensureDir() {
   if (!SdMan.exists(TB_DIR)) SdMan.mkdir(TB_DIR);
 }
 
+// "File Error" on its own cannot distinguish a card that isn't mounted from a
+// directory that isn't there from a name that produced a path nobody can
+// open, and a release build has no serial log to consult (-DRELEASE_BUILD
+// compiles every DBG_PRINTF out). So the failure says which, on the screen,
+// where the person who hit it is already looking.
+static void reportFileFailure(const char* what, const char* path) {
+  char msg[80];
+  snprintf(msg, sizeof(msg), "?%s %s", what, path);
+  screenEditorTermPrintLine(msg);
+  snprintf(msg, sizeof(msg), "?card=%d dir=%d", (int)SdMan.begin(), (int)SdMan.exists(TB_DIR));
+  screenEditorTermPrintLine(msg);
+}
+
 void fsbegin() { ensureDir(); }
 
 uint8_t ifileopen(const char* filename) {
@@ -431,6 +454,7 @@ uint8_t ifileopen(const char* filename) {
   tbPath(filename, path, sizeof(path));
   if (ifile) ifile.close();
   ifile = SdMan.open(path, O_RDONLY);
+  if (!ifile) reportFileFailure("LOAD", path);
   return ifile ? 1 : 0;
 }
 
@@ -445,6 +469,7 @@ uint8_t ofileopen(const char* filename, const char* m) {
   if (ofile) ofile.close();
   const bool append = (m && m[0] == 'a');
   ofile = SdMan.open(path, append ? (O_WRONLY | O_CREAT | O_APPEND) : (O_WRONLY | O_CREAT | O_TRUNC));
+  if (!ofile) reportFileFailure("SAVE", path);
   return ofile ? 1 : 0;
 }
 

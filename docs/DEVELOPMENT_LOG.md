@@ -2443,3 +2443,43 @@ them back unchanged and reports `LEN` of 3 for a three-character accented
 word. Nothing in the tokeniser touches bytes between quotes. So the encoding
 holds end to end -- keyboard, grid, typed line, interpreter, terminal -- and
 the only place it is visible from outside is a SAVEd file, as noted above.
+
+## Accented filenames: SdFat rejects them outright
+
+`SAVE` failed with `File Error` only when the *name* had an accent -- the
+content was never the problem. Found by making the failure self-describing
+rather than by reading more code: `File Error` alone cannot tell a missing
+card from a missing directory from a name nobody can open, and a release
+build has no serial log (`-DRELEASE_BUILD`). `ofileopen()`/`ifileopen()` now
+print the path they tried plus `card=` and `dir=` when they fail, which
+narrowed it in one attempt. That instrumentation is worth keeping.
+
+The cause is one line in SdFat:
+
+    inline bool lfnLegalChar(uint8_t c) {
+      return !(lfnReservedChar(c) || c & 0X80);
+    }
+
+Every byte with the high bit set is illegal in a long file name, so the
+*open* failed, not the write. SdFat can be built with
+`USE_UTF8_LONG_NAMES`, but its own config warns it costs "significantly more
+flash memory and a small amount of extra RAM" -- and RAM is the resource
+this firmware has spent the most effort clawing back. It would also change
+how files are named on a card shared with the reader firmwares.
+
+So filenames fold to plain ASCII (`ascii_fold.h`): `ação` becomes `acao`.
+The user's call, and the right one -- but the important property is that it
+is a *rule*, not a truncation. `SAVE` and `LOAD` both apply it, so `LOAD
+"ação"` opens the file `SAVE "ação"` created, and so does `LOAD "acao"`.
+
+`asciiFold()` takes a codepoint rather than a byte because its two callers
+hold different encodings, which is the kind of detail that becomes a bug if
+left implicit: BASIC strings are Latin-1, so the byte *is* the codepoint,
+while the editors' titles are UTF-8 and have to be decoded first.
+
+That second caller was quietly broken in its own way, found while wiring
+this up. `titleToFilename()` walked the title byte by byte and kept only
+`a-z0-9`, so an accented letter -- two UTF-8 bytes, neither of them in that
+set -- vanished entirely: naming a program `ação` in the editor produced
+`aao.bas`. It decodes and folds now, so it produces `acao.bas`. Losing the
+accent is expected; losing the letter was not.

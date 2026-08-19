@@ -1,7 +1,9 @@
 #include "file_manager.h"
 #include "text_editor.h"
+#include "ascii_fold.h"
 #include <Arduino.h>
 #include <SDCardManager.h>
+#include <Utf8.h>
 #include <cstring>
 
 // --- Collections (see file_manager.h) ---
@@ -80,8 +82,16 @@ static void titleToFilename(const char* title, char* out, int maxLen) {
   const int maxBase = maxLen - extLen - 1;
   bool hasDot = false;
   int j = 0;
-  for (int i = 0; title[i] != '\0' && j < maxBase; i++) {
-    char c = title[i];
+  // Decoded rather than walked byte by byte, because a title is UTF-8: an
+  // accented letter is two bytes, and the old byte loop kept neither of them,
+  // so "ação" quietly became "aao". Folding to plain ASCII loses the accent
+  // but not the letter, and it is what the filename has to be anyway --
+  // SdFat rejects high bytes outright (see ascii_fold.h).
+  const unsigned char* u = (const unsigned char*)title;
+  uint32_t cp;
+  while ((cp = utf8NextCodepoint(&u)) != 0 && j < maxBase) {
+    char c = asciiFold(cp);
+    if (c == 0) continue;  // no ASCII stand-in: drop it
     if (c >= 'A' && c <= 'Z') c += 32;
     if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
       out[j++] = c;

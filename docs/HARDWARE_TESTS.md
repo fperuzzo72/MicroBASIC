@@ -282,7 +282,13 @@ number to keep watching.
 - [ ] `10 PRINT "ação"` stored as a program line, then `LIST` -- the accents
       survive being tokenised and printed back.
 - [ ] `SAVE` a program with an accented string literal, `LOAD` it back, and
-      `LIST` -- the accent survives the round trip.
+      `LIST` -- the accent survives the round trip. (String *contents* keep
+      their accents; only file *names* fold.)
+- [ ] `SAVE "ação"` succeeds and `DIR` shows `acao`. `LOAD "ação"` and
+      `LOAD "acao"` both open it -- same rule applied on both sides.
+- [ ] `New Program` titled `ação` produces `acao.bas`, not `aao.bas`.
+- [ ] A file operation that genuinely fails now prints the path it tried and
+      `card=`/`dir=`, instead of a bare `File Error`.
 
 Free A/B for the phantom RIGHT, costing nothing to try: the sync screen
 pins the CPU at 80MHz with light sleep off for as long as it is open. If
