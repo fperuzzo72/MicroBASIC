@@ -24,7 +24,7 @@ Ou use `VC`, que lista a pasta e carrega o escolhido.
 | `invaders.bas` | 2 (64 col) | tempo real | o mesmo, mais construção de string por posição |
 | `lander.bas` | qualquer | por turnos | `INPUT` numérico, aritmética de ponto flutuante |
 | `forca.bas` | qualquer | por turnos | `INPUT` de string, `READ`/`DATA`, `ASC`, substring |
-| `sokoban.bas` | 1 ou maior | por turnos | duas camadas em strings, `GET` bloqueante, 4 níveis em `DATA` |
+| `sokoban.bas` | 1 ou maior | por turnos | duas camadas em strings, `GET` bloqueante, 4 fases em `DATA` |
 
 ## Veredito do hardware
 
@@ -70,8 +70,16 @@ do interpretador (que dariam o tamanho do display) estão atrás de um
 
 Por isso `invaders.bas` **pergunta** no início e sai se a resposta for não.
 O `sokoban.bas` precisa de 13 linhas, então não cabe no SCREEN 0 (que tem
-10); em SCREEN 1 ou maior fica bem, e as 12 colunas do tabuleiro cabem em
-qualquer modo.
+10); em SCREEN 1 ou maior fica bem. Ele desenha o tabuleiro nas colunas 18 a
+29 e a legenda dos símbolos nas colunas 2 a 11 — as duas faixas não se
+encostam em nenhum modo a partir do SCREEN 1.
+
+### As 4 fases do sokoban
+
+Verificadas por um solver BFS antes de entrarem no arquivo, com a solução
+ótima em movimentos: **11, 17, 25 e 28**. Dois candidatos que pareciam bons
+no papel eram insolúveis e foram descartados — um nível de Sokoban impossível
+não se anuncia, então a verificação não era opcional.
 `pacman.bas` só avisa num `REM`. Se um dia o `SCREEN` virar um token do
 interpretador (ver `Next up` no README principal), os dois podem simplesmente
 se ajustar sozinhos.

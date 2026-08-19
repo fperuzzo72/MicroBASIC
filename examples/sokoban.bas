@@ -86,8 +86,21 @@
 630 GOSUB 700
 640 NEXT
 650 GOSUB 800
+655 GOSUB 820
 660 LOCATE 1,13:PRINT "setas empurram   R recomeca   Q sai";
 670 RETURN
+820 REM ---- legenda, a esquerda do tabuleiro ----
+825 REM O tabuleiro ocupa as colunas 18 a 29, entao
+826 REM sobra a faixa 2..15 e ela nao encosta nele.
+830 LOCATE 2,4:PRINT "# parede";
+835 LOCATE 2,5:PRINT "$ caixa";
+840 LOCATE 2,6:PRINT ". destino";
+845 LOCATE 2,7:PRINT "* caixa no";
+850 LOCATE 2,8:PRINT "  destino";
+855 LOCATE 2,9:PRINT "@ voce";
+860 LOCATE 2,10:PRINT "+ voce no";
+865 LOCATE 2,11:PRINT "  destino";
+870 RETURN
 700 REM ---- desenha a celula I ----
 710 R=INT((I-1)/12)+1
 720 C=I-(R-1)*12
