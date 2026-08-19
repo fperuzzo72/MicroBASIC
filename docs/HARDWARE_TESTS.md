@@ -318,3 +318,23 @@ shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).
 - [ ] `MENU` still exits to the main menu, and physical Back still works.
 - [ ] The prose editor (New Program) still opens, edits and saves.
 - [ ] BLE keyboard still connects on boot.
+
+## 14. Programas de exemplo (examples/)
+
+Todos verificados no harness de host; o que falta é a sensação real no
+painel.
+
+- [ ] `lander.bas` em qualquer SCREEN: pousar abaixo de 5 m/s é possível
+      (queima ~10 anula a gravidade; descer rápido e frear no fim gasta
+      menos). Naive: sem queima, ou queima fixa, sempre bate.
+- [ ] `forca.bas`: sorteia palavras diferentes entre execuções (a semente vem
+      de `@T`), acerta e erra corretamente, enforca em 6.
+- [ ] `invaders.bas` **em SCREEN 2**: a frota de 3x8 cabe, desce ao bater nas
+      bordas, o tiro acerta a coluna sob a nave, e as três saídas funcionam
+      (limpou / invadiram / Q).
+- [ ] `invaders.bas` **fora** de SCREEN 2: responder "N" na pergunta inicial
+      sai limpo. Responder "S" estando em SCREEN 0 ou 1 vai embaralhar a tela
+      — é o comportamento esperado, dado que não há como detectar o modo.
+- [ ] Ritmo: um quadro leva cerca de um segundo. A pergunta a responder é se
+      os dois jogos em tempo real ficam *agradáveis* nesse ritmo ou só
+      toleráveis.
