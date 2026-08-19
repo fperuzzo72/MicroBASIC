@@ -2528,3 +2528,34 @@ withdrawn in the same message once this behaviour came to light, and the
 reasoning is worth keeping: an alias would have made a command that does not
 work reachable by a second, more familiar name. `NEW` does what was actually
 wanted.
+
+### Both fixed after all
+
+The `CLR` bug is now patched and `CLEAR` added, at the user's direction --
+overriding the "document, don't patch" default recorded above, on the
+grounds that the fix is trivial and the patch set already exists for exactly
+this kind of intervention. Two new scripts, `patches/tinybasic/05` and `06`.
+
+The fix is one comparison, `<` to `<=`. Before changing it, the obvious
+worry: does writing at index `memsize` run off the end of the array? It does
+not, and the answer is also *why the bug exists*. `mem` is declared
+`mem_t mem[MEMSIZE]` and `ballocmem()` returns `MEMSIZE - 1`, so
+`memsize == MEMSIZE - 1` is the last valid index. Upstream's loop stops one
+short of a byte that is real, addressable, and part of the heap.
+
+The alias exploits how the lexer already works rather than adding machinery.
+It scans `keyword[]` in order and returns the token at the matching index in
+`tokens[]`, so two indices carrying the same token are simply two spellings.
+Order matters for a reason worth recording: `LIST` and `HELP` print a token
+by searching for its *first* index, so putting `CLR` ahead of `CLEAR` means a
+line typed as `20 CLEAR` lists back as `20 CLR`. Verified on the harness --
+listings stay in one spelling no matter which was typed.
+
+Verified after patching, on the host harness before flashing: all five values
+that used to survive (`5, 8, 100, 3.5, 1`) now clear to 0 under both
+spellings, strings clear, the program survives `CLEAR`, and `FOR`/`NEXT`,
+`LEN`, `NEW` and `LIST` are unaffected.
+
+`CONT` stays documented rather than patched. That is not inconsistency: this
+fix only touches bytes the function already meant to zero, while `CONT`
+needs interpreter state saved and restored across a break.

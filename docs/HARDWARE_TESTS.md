@@ -294,9 +294,11 @@ number to keep watching.
 
 - `NEW` erases the program **and** the variables. This is the one to use.
 - A line number typed alone erases that line.
-- `CLR` (this interpreter's `CLEAR`) clears variables but leaves one byte of
-  the first one behind -- upstream bug, diagnosed in DEVELOPMENT_LOG.md.
-  Avoid it; `NEW` covers the need.
+- `CLR` clears variables and keeps the program. `CLEAR` is the same command
+  under its MS-BASIC/MSX name. The upstream off-by-one that made `CLR` leave
+  the first variable corrupted is patched (patches/tinybasic/05).
+  - [ ] `A=5` then `CLR` then `PRINT A` gives **0**, not 2.
+  - [ ] `CLEAR` does the same, and a line typed `20 CLEAR` lists as `20 CLR`.
 - `DELETE "name"` deletes a **file on the SD card**, not a range of program
   lines as it would on MSX. There is no line-range delete here.
 

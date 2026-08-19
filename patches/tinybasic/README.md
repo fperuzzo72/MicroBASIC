@@ -49,6 +49,19 @@ implementation of the runtime contract, and ours is `editor/src/tb_runtime.cpp`.
 | `02_rename_entry_points.py` | `setup()`/`loop()` → `basicSetup()`/`basicLoop()` (they'd collide with the firmware's own), and removes upstream's `main()`. |
 | `03_c_linkage_and_config.py` | `extern "C"` guards (interpreter is C, our runtime is C++), real `stdint.h` instead of upstream's hand-rolled Arduino-compat typedefs, and a fixed `MEMSIZE`. |
 | `04_library_build_flags.py` | `library.json` isolating this project's warnings-as-errors from third-party code. |
+| `05_fix_clrvars_offbyone.py` | Bug fix: `clrvars()` left one byte uncleared at the top of the heap, so `CLR` corrupted the first variable instead of zeroing it (`A=5` became 2). One character. |
+| `06_clear_alias.py` | `CLEAR` accepted as a second spelling of `CLR` — the MS-BASIC/MSX name for the same command. `CLR` stays canonical, so listings never mix the two. |
+
+Note that `05` and `06` are a different kind of patch from `01`-`04`. Those
+adapt upstream to this target — the things anyone embedding this interpreter
+would have to do. `05` fixes a real bug in upstream, and `06` adds a keyword.
+Both are deliberate and small, and both are here rather than in a fork so
+that re-running `fetch.sh` against a newer upstream will fail loudly (the
+scripts assert on the text they expect) rather than silently dropping them.
+Upstream bugs are not fixed here as a matter of course: `CONT` after a break
+is also broken and is documented rather than patched, because fixing it means
+saving and restoring interpreter state — a different order of risk from a
+comparison operator.
 
 Each script fails loudly (`assert`) rather than applying a partial patch.
 
