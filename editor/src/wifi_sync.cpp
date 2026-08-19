@@ -75,7 +75,10 @@ static int syncLogCount = 0;
 static bool pcConnected = false;
 
 static unsigned long lastHttpActivityMs = 0;
-static constexpr unsigned long SYNC_TIMEOUT_MS = 60000;  // 60s no HTTP → auto-disconnect
+// Idle timeout. This counts from the last HTTP request, and browsing a file
+// list is mostly reading -- 60s was short enough to drop the connection while
+// the user was still deciding what to download.
+static constexpr unsigned long SYNC_TIMEOUT_MS = 300000;  // 5 min no HTTP
 static bool syncCompletePending = false;  // Set by handler, acted on in wifiSyncLoop
 
 // --- DONE state ---
@@ -301,6 +304,15 @@ static void beginScan() {
   pinClockForRadio(true);
 
   WiFi.mode(WIFI_STA);
+  // WiFi's own modem power save, which is separate from the CPU's and on by
+  // default. The IDF log made the cost plain: "total sleep time: 65986964 us
+  // / 76529859 us" -- the radio was asleep 86% of the session, so every TCP
+  // round trip waited on the next DTIM beacon (102ms here). That is what made
+  // the file page crawl, and it is why a 9.6KB body could not finish sending
+  // inside WiFiClient::write()'s retry budget and arrived truncated: the HTML
+  // rendered, the script tag at the end did not, so no tab worked and no file
+  // list appeared. Sync is a foreground activity of at most a few minutes.
+  WiFi.setSleep(false);
   WiFi.disconnect(true);
 
   // scanNetworks() reports failure immediately rather than through
@@ -643,7 +655,24 @@ static void handleSyncComplete() {
 
 static void handleFilesPage() {
   lastHttpActivityMs = millis();
-  server->send(200, "text/html", FILES_PAGE_HTML);
+
+  // Two things this deliberately does not do. It does not call send() with
+  // the page as a String: that copies ~9.6KB into one contiguous allocation,
+  // on a device that has had 7KB to give. And it does not hand the whole
+  // 9.6KB to one write() either -- WiFiClient::write() gives up after a fixed
+  // number of retries, and a body that runs out of retries is not an error
+  // anyone sees, it is a page that renders and a script tag that does not
+  // arrive. Sent a TCP segment at a time, each chunk gets its own retry
+  // budget, so a stall costs a pause rather than the rest of the file.
+  const size_t len = strlen(FILES_PAGE_HTML);
+  server->setContentLength(len);
+  server->send(200, "text/html", "");
+
+  constexpr size_t CHUNK = 1440;  // one segment at the default MSS
+  for (size_t off = 0; off < len; off += CHUNK) {
+    const size_t n = (len - off < CHUNK) ? (len - off) : CHUNK;
+    server->sendContent_P(FILES_PAGE_HTML + off, n);
+  }
 }
 
 // The file manager now lives at "/" (see startHttpServer) — redirect anyone
@@ -789,7 +818,10 @@ static void startHttpServer() {
   server->onNotFound(handleNotFound);
   server->begin();
   MDNS.begin("microbasic");
-  DBG_PRINTF("[SYNC] HTTP server started at %s\n", WiFi.localIP().toString().c_str());
+  DBG_PRINTF("[SYNC] HTTP server at %s heap=%u largest=%u\n",
+             WiFi.localIP().toString().c_str(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 static void stopHttpServer() {

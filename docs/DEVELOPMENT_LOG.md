@@ -2128,3 +2128,70 @@ the text editor's 16KB clipboard (allocate on demand) and the interpreter's
 Note also that MicroWriter, where sync works, does not carry the
 interpreter's `mem` at all -- 16KB of the difference is simply the price of
 having a BASIC in the same binary.
+
+## Sync, diagnosed from the IDF log
+
+The heap work above got the scan running and the device onto the network,
+which turned the remaining problems into ones a serial capture could answer.
+Worth recording that the capture itself needed a detour: `-DRELEASE_BUILD` is
+set in platformio.ini, so every `DBG_PRINTF` in this firmware compiles to
+nothing. None of the instrumentation added for this appears on the wire. The
+ESP-IDF log is a separate mechanism and was still there, and it turned out to
+say everything that mattered.
+
+**The page crawled, and arrived truncated.** One line explains both:
+
+    wifi:pm stop, total sleep time: 65986964 us / 76529859 us
+
+The radio was asleep for 86% of the session. WiFi's own modem power save is
+separate from the CPU light sleep we had already pinned off, is on by
+default, and parks the radio between DTIM beacons -- 102ms apart on this
+network. Every TCP round trip waited for one.
+
+That is the slowness directly, and the truncation indirectly:
+`WiFiClient::write()` retries a fixed number of times and then returns short,
+and `sendContent_P` does not loop. A 9.6KB body handed to it in one call ran
+out of retries partway through. Nothing reports that -- the HTML that did
+arrive rendered fine, and what did not arrive was the `<script>` at the end
+of the file. Hence the exact symptoms reported: the page appeared, the Notes
+tab showed no notes, and clicking "BASIC programs" did nothing, because
+`selectTab` had never been defined.
+
+Fixes, in order of how much they matter:
+
+- `WiFi.setSleep(false)` for the duration of the sync screen. Sync is a
+  foreground activity of at most a few minutes; there is nothing to save
+  power for while the user is standing there waiting for a file list.
+- The page is sent one 1440-byte segment at a time. Each chunk gets its own
+  retry budget, so a stall costs a pause instead of the rest of the file.
+- The idle timeout went from 60s to 5 minutes. Browsing a file list is mostly
+  reading, and 60s was dropping the connection while the user was still
+  deciding what to download. (The "sync complete, no change" the user saw
+  after a minute was this timeout, not a sync that had decided nothing
+  changed.)
+
+Also visible in the log, and left alone for now:
+
+    W wifi:Error! Should use default active scan time parameter for WiFi
+      scan when Bluetooth is enabled!!!!!!
+
+Coexistence is compiled in (`CONFIG_SW_COEXIST_ENABLE=y`) and the scan does
+use default timings, so this is the stack noting the constraint rather than a
+failure. Worth remembering if scanning gets flaky again.
+
+**BLE keyboard dropping.** Reported as losing sync regularly, with timeout or
+power saving suspected. The likelier cause is the same heap the WiFi stack
+was short of: the BLE connect task needs a 20480-byte contiguous allocation
+at connect time, and when it cannot get one, `xTaskCreate` fails silently and
+the keyboard simply never reconnects -- this exact failure is already
+documented above, from when the largest free block was 8704. Static RAM is
+now 27.8KB lower than when that was happening, which should give it room.
+Not yet confirmed on hardware.
+
+**Password not being saved.** Not reproduced or explained. The SAVE_PROMPT
+state is entered on any connection that did not use a stored password, and
+its screen is drawn with explicit instructions ("Save password? Enter/Up:
+Yes  Down/Esc: No"), so the flow looks right on inspection. The open question
+is whether that screen is being reached and dismissed, possibly by a
+keystroke lost to the BLE dropout above. Needs a hardware observation before
+changing anything.

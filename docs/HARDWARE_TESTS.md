@@ -224,7 +224,24 @@ number to keep watching.
       `MORE?` prompt, which is intended), `CATALOG`/`FILES`/`DIR` still list,
       `SAVE`/`LOAD` still work, and the screen editor still takes typing.
 
-## 10. Regression check
+## 10. Round seven: sync
+
+- [ ] The file page loads at a normal speed, not in tens of seconds.
+- [ ] The Notes tab lists the notes on the card.
+- [ ] Clicking "BASIC programs" switches tabs and lists /MicroBASIC/programs.
+- [ ] Uploading `examples/pacman.bas` through the Programs tab puts it where
+      `LOAD "pacman.bas"` finds it.
+- [ ] The session survives a few minutes of reading without disconnecting.
+- [ ] **Password saving**: on connecting with a typed password, does the
+      "Save password? Enter/Up: Yes  Down/Esc: No" screen appear at all? If
+      it does and Enter is pressed, is the network offered without asking
+      next time? This one has no diagnosis yet -- what is needed is the
+      answer to that first question.
+- [ ] Does the BLE keyboard still drop out? 27.8KB of static RAM came back
+      this round, and the suspected cause is the connect task failing to get
+      its 20KB contiguous allocation.
+
+## 11. Regression check
 
 Quick pass over things that already worked, since these changes touched
 shared code (`screen_editor`, `input_handler`, `ui_renderer`, `wifi_sync`).
