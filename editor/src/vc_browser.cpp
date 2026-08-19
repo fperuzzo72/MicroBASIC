@@ -153,7 +153,6 @@ void vcHandleKey(uint8_t keyCode, uint8_t modifiers) {
       // anything else would leave RUN/LIST looking at an empty program.
       char cmd[MAX_FILENAME_LEN + 16];
       snprintf(cmd, sizeof(cmd), "LOAD \"%s\"", entries[selected].name);
-      screenEditorStartNewInputLine();
       const bool ok = tbExecuteLine(cmd);
       if (ok) {
         char msg[MAX_FILENAME_LEN + 16];
@@ -163,7 +162,11 @@ void vcHandleKey(uint8_t keyCode, uint8_t modifiers) {
       // Either way we return to the terminal: on failure the interpreter has
       // already printed its own error there, which is more informative than
       // anything this picker could put in its status bar.
-      screenEditorStartNewInputLine();
+      //
+      // Only break the line if something left the cursor mid-row -- the same
+      // rule the command dispatcher uses. TermPrintLine already ends with a
+      // newline, so advancing here as well left a blank line behind.
+      if (screenEditorGetCursorCol() != 0) screenEditorStartNewInputLine();
       vcClose();
       break;
     }

@@ -504,9 +504,12 @@ static void executeLogicalLine(const char* line) {
     return;
   }
   if (isWord("VC")) {
-    // Full-screen program picker (vc_browser.h). Clears its own command text
-    // first so the terminal it returns to isn't left with "VC" on it.
-    screenEditorClearLogicalLine();
+    // Full-screen program picker (vc_browser.h). The typed "VC" is left on
+    // screen on purpose: every other command now stays visible too, and it
+    // gives the "Loaded ..." line that follows something to attach to. (It
+    // used to be cleared, which made returning from VC look as though the
+    // terminal had been wiped.)
+    screenEditorStartNewInputLine();
     vcOpen();
     return;
   }

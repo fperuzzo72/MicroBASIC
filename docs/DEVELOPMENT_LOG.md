@@ -1842,3 +1842,74 @@ unilaterally. Documented as a known limitation; `RUN` restarts fine.
 - `PRINT "x"` breaks the line and `PRINT "x";` does not, exactly as classic
   BASIC. Not a bug, just a forgotten detail.
 - Variables persist between direct-mode statements, as expected.
+
+
+## Phantom RIGHT: a concrete, testable hypothesis at last
+
+New evidence from the user, gathered across this project and the parallel
+MicroWriter one:
+
+- It reproduces on a **second, different X4**, so it is not one unit's wear.
+- It does **not** happen on CrossPoint, CrossInk or CPR-vCodex.
+- It **does** happen on original MicroSlate, in reduced form -- only at boot
+  when arriving from an OTA switch, never on sleep/wake within the same slot.
+
+So it is something this firmware lineage does that the readers don't. Compared
+the two directly:
+
+| | this firmware | CrossPoint / CPR-vCodex |
+|---|---|---|
+| framework | `arduino, espidf` | `arduino` |
+| power management | `esp_pm_configure()`, 10-80MHz DFS + auto light sleep | none at all |
+
+The readers never call `esp_pm_configure`. We enable dynamic frequency
+scaling across an 8x range (80MHz down to 10MHz) plus automatic light sleep.
+
+That is a strong candidate, because the ESP32-C3's SAR ADC sampling is timed
+off the APB clock. A conversion taken during or immediately after a frequency
+transition can come out wrong -- and on this resistor ladder RIGHT occupies
+the extreme bottom of the range (anything under 750 of 4095), so *any* reading
+biased low classifies as "RIGHT pressed". Nothing else on the ladder is that
+exposed.
+
+It also accounts for everything previously unexplained:
+
+- Absent on the readers, because they have no DFS.
+- Present across different units, because it is firmware, not hardware.
+- Worse at boot after an OTA switch -- a different clock/PM state path.
+- Worse after the BASIC integration -- more CPU activity, more transitions.
+- And crucially, why **raising the debounce made it worse**: a longer window
+  integrates more wrong samples rather than filtering them. Debounce filters
+  brief spikes; these are systematically wrong conversions during transitions,
+  which is a different failure entirely. That result always looked backwards
+  and now makes sense.
+
+Decisive experiment, cheap to run: pin `min_freq_mhz = max_freq_mhz = 80` and
+`light_sleep_enable = false`, then use it normally. If the phantom presses
+stop, it's confirmed. The cost is battery life, so this is a diagnostic rather
+than the fix -- the proper fix, if confirmed, is to hold an `esp_pm_lock`
+across ADC reads so the frequency can't move under a conversion, leaving DFS
+enabled everywhere else.
+
+Not run yet; recorded here so the next session can start from it rather than
+from the dead ends.
+
+## Round three of hardware testing
+
+- **VC's return to the terminal.** Two problems, both fixed. It cleared the
+  typed "VC" line, which made returning look as though the terminal had been
+  wiped -- now the command stays visible, consistent with every other command
+  since the interpreter took over, and it gives the "Loaded ..." line context.
+  And it left a blank line, the same unconditional-advance pattern already
+  fixed three times elsewhere; it now uses the shared cursor-column check.
+- **VC across SCREEN modes** works. On SCREEN 0 (32 columns) the footer
+  crowds out the detail text, which the user judged not worth addressing --
+  it's informational only.
+- **SAVE** confirmed working after the `od` dispatch fix.
+- **File sizes differ between a hand-written .txt and a SAVEd program** (48
+  vs 35 bytes for the same two-line program). Expected: SAVE re-emits from the
+  interpreter's tokenised form, so it is canonical -- keywords upper-cased,
+  single spaces, LF line endings. A file written on a PC typically carries
+  CRLF (one extra byte per line), possibly a trailing blank line, and whatever
+  spacing was typed. The saved form being smaller and consistent is the point;
+  it round-trips identically from then on.

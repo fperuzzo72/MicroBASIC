@@ -133,8 +133,8 @@ Fixed after that round, needs retest:
 Still to check:
 
 - [ ] `NEW` empties the program; `LIST` after it shows nothing.
-- [ ] `VC` in each of SCREEN 0/1/2/3 — the layout is computed rather than
-      hand-laid and has still never been seen in modes other than the default.
+- [ ] `VC` returning to the terminal: the typed "VC" now stays on screen, and
+      there should be no blank line after "Loaded ...".
 - [ ] Long `RUN` output still repaints as it goes (the runtime's `byield()`
       flushes the display every 500ms).
 
