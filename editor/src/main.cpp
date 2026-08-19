@@ -782,7 +782,9 @@ static void processPhysicalButtons() {
 
 // Global variable for activity tracking
 static unsigned long lastActivityTime = 0;
-const unsigned long IDLE_TIMEOUT = 5UL * 60UL * 1000UL; // 5 minutes
+// Sleep after this long with no input. Five minutes was the original value
+// and is short for a device you sit and think in front of.
+const unsigned long IDLE_TIMEOUT = 15UL * 60UL * 1000UL; // 15 minutes
 
 void registerActivity() {
   lastActivityTime = millis();

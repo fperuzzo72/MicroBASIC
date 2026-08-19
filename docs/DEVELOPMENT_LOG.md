@@ -2625,3 +2625,42 @@ Vale o registro do método, porque agora se pagou três vezes (invaders,
 sokoban, e o levantamento do `CLR`): **quando o sintoma é visual, reconstrua
 a tela.** O harness emite VT52 que o runtime POSIX converte em ANSI; trinta
 linhas de Python replicam isso numa grade e imprimem o que o painel mostraria.
+
+## O RIGHT fantasma: resolvido, medindo
+
+Resolvido no MicroWriter e trazido para cá — `InputManager` é a mesma
+biblioteca nos dois. O levantamento completo está em
+`../MicroWriter/docs/DEVELOPMENT_LOG.md`; o essencial:
+
+Uma build temporária mostrou o valor cru do ADC na própria tela do menu, que é
+a primeira coisa que aparece depois de uma troca de partição. Duas coisas
+saíram dela.
+
+**As duas primeiras amostras do laço devolvem `0` cravado**, nos dois caminhos
+de reset, sem ninguém encostar no aparelho — idêntico em duas capturas, nos
+mesmos ~4635 e ~4765ms. E `0` cai na faixa do RIGHT, que não tem piso
+(`-INT32_MIN < leitura <= 750`). Daí o menu abrir já uma linha abaixo.
+
+**Um RIGHT legítimo também lê `0`.** Isso derrubou a correção que eu ia
+fazer: dar um piso à faixa teria desligado o botão direito. O RIGHT é a menor
+resistência da escada e lê no fundo dela de verdade. Nenhuma regra sobre o
+*valor* separa o fantasma do toque real, porque são o mesmo número — o
+discriminador tem de ser **quando**, não **o quê**.
+
+A guarda, então: em `InputManager::update()`, sobre o estado cru e antes do
+debounce, nada é reportado enquanto a leitura não disser "nada pressionado" ao
+menos uma vez. Um botão que nunca foi visto solto não pode ter sido apertado.
+
+Três coisas que este caso deixou registradas, além da correção:
+
+- Uma tentativa anterior falhou por olhar `isPressed()`, o estado **já
+  debounced**, que atrasa e portanto reportava "nada pressionado" durante a
+  própria falha. A ideia estava certa e o sinal, errado.
+- Eu li um conjunto de números como se fosse do caminho vindo do CrossPoint
+  quando era de um reset pós-flash, e com isso **descartei a hipótese certa**.
+  Foi o usuário que corrigiu. Sem isso, teria ido procurar em outro lugar.
+- Por que as duas primeiras conversões saem zeradas continua **em aberto**.
+  Responder exigiria instrumentar o driver de ADC. A guarda não depende da
+  resposta.
+
+Também aqui: timeout de sleep de 5 para 15 minutos.

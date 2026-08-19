@@ -71,7 +71,6 @@ class InputManager {
   static constexpr uint8_t BTN_UP = 4;
   static constexpr uint8_t BTN_DOWN = 5;
   static constexpr uint8_t BTN_POWER = 6;
-
   // Pins
   static constexpr int BUTTON_ADC_PIN_1 = 1;
   static constexpr int BUTTON_ADC_PIN_2 = 2;
@@ -85,6 +84,20 @@ class InputManager {
 
  private:
   int getButtonFromADC(int adcValue, const int ranges[], int numButtons);
+
+  // Nothing is reported until the raw reading has been seen at rest once.
+  //
+  // Measured on hardware: the first two ADC conversions after boot return
+  // exactly 0 on channel 1, on both reset paths, with nobody touching the
+  // device -- and 0 falls in RIGHT's band, which has no floor. That is the
+  // phantom RIGHT: the menu arrives already one entry down.
+  //
+  // The discriminator has to be *when*, not *what*: a real RIGHT press reads
+  // low too, so rejecting the value would reject the button. Gating on the
+  // raw state rather than the debounced one matters as well -- an earlier
+  // attempt gated on isPressed(), which lags by the debounce interval and so
+  // reported "idle" during the very glitch it meant to skip.
+  bool settled;
 
   uint8_t currentState;
   uint8_t lastState;
@@ -101,16 +114,6 @@ class InputManager {
   static const int ADC_RANGES_2[];
 
   static constexpr int ADC_NO_BUTTON = 3800;
-  // Tried raising this from the original 5ms (to 30ms, then 120ms) while
-  // chasing a phantom-RIGHT-press bug that silently corrupts typed BASIC
-  // lines -- confirmed real and reproducible on hardware, but debounce
-  // timing turned out not to be the lever: 30ms didn't fix it, and 120ms
-  // made it *worse* (near-continuous phantom presses instead of two at
-  // connect time), which rules out "just needs more time to settle" and
-  // points at something structural (wiring/contact on this specific unit,
-  // or real sustained interference the debounce timer can't distinguish
-  // from a held button). Reverted to the original value -- see
-  // docs/DEVELOPMENT_LOG.md for the investigation and what's still open.
   static constexpr unsigned long DEBOUNCE_DELAY = 5;
 
   static const char* BUTTON_NAMES[];
