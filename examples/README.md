@@ -24,6 +24,7 @@ Ou use `VC`, que lista a pasta e carrega o escolhido.
 | `invaders.bas` | 2 (64 col) | tempo real | o mesmo, mais construção de string por posição |
 | `lander.bas` | qualquer | por turnos | `INPUT` numérico, aritmética de ponto flutuante |
 | `forca.bas` | qualquer | por turnos | `INPUT` de string, `READ`/`DATA`, `ASC`, substring |
+| `sokoban.bas` | 1 ou maior | por turnos | duas camadas em strings, `GET` bloqueante, 4 níveis em `DATA` |
 
 ## Veredito do hardware
 
@@ -34,8 +35,10 @@ esperteza no programa muda isso — o painel é o painel.
 O que isso indica é o gênero, não a implementação. O alvo certo é o
 quebra-cabeça no espírito do ZX81: empurrar caixas, problemas em que a
 *ordem* das jogadas decide se tem solução. Ali o segundo entre quadros não é
-espera, é o tempo de olhar o tabuleiro. `lander.bas` e `forca.bas` já
-funcionam assim.
+espera, é o tempo de olhar o tabuleiro. `lander.bas`, `forca.bas` e sobretudo
+`sokoban.bas` já funcionam assim: o `sokoban` só repinta quando você aperta
+uma tecla, então não existe quadro perdido — o painel fica parado enquanto
+você pensa, que é exatamente o que se quer dele.
 
 ## Uma nota sobre e-ink e ritmo
 
@@ -66,6 +69,9 @@ do interpretador (que dariam o tamanho do display) estão atrás de um
 `DISPLAYDRIVER` que este firmware não define.
 
 Por isso `invaders.bas` **pergunta** no início e sai se a resposta for não.
+O `sokoban.bas` precisa de 13 linhas, então não cabe no SCREEN 0 (que tem
+10); em SCREEN 1 ou maior fica bem, e as 12 colunas do tabuleiro cabem em
+qualquer modo.
 `pacman.bas` só avisa num `REM`. Se um dia o `SCREEN` virar um token do
 interpretador (ver `Next up` no README principal), os dois podem simplesmente
 se ajustar sozinhos.

@@ -2598,3 +2598,30 @@ the second between frames is not latency, it is the pause while you look at
 the board. `lander.bas` and `forca.bas` already work on that principle; the
 next examples should lean the same way rather than trying to be arcade games
 on a display that cannot be one.
+
+### sokoban.bas: o gênero certo, e um bug que só a tela mostrou
+
+Escrito como resposta direta ao veredito de ritmo. Não tem relógio: o laço
+espera em `GET` até vir uma tecla, então o painel só repinta quando o jogador
+decide alguma coisa. Não existe quadro perdido, e o segundo de refresh vira o
+tempo de olhar o tabuleiro.
+
+Duas coisas foram verificadas antes de escrever uma linha de BASIC, pela
+mesma razão que o lander foi simulado: **um nível de Sokoban insolúvel não se
+anuncia**. Um solver BFS em Python confirmou os quatro níveis (11, 17, 25 e
+28 movimentos) e descartou dois candidatos impossíveis que pareciam bons no
+papel. Depois o programa foi rodado com a solução do solver injetada no lugar
+do `GET`, e a tela reconstruída a partir do fluxo de escapes.
+
+Foi essa reconstrução que pegou o bug de verdade. A rotina que desenha uma
+casa imprime `@` sempre que a casa é a do jogador, e o movimento repintava a
+casa *velha* antes de atualizar `P` — então em vez de apagar o jogador ela o
+redesenhava. O resultado era um rastro de `@` por todo lugar onde ele já
+tinha passado, o tabuleiro inteiro sujo depois de vinte jogadas. Óbvio no
+aparelho, invisível lendo o código, e teria custado uma viagem de ida e volta
+ao hardware.
+
+Vale o registro do método, porque agora se pagou três vezes (invaders,
+sokoban, e o levantamento do `CLR`): **quando o sintoma é visual, reconstrua
+a tela.** O harness emite VT52 que o runtime POSIX converte em ANSI; trinta
+linhas de Python replicam isso numa grade e imprimem o que o painel mostraria.
