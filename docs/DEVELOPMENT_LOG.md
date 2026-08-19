@@ -2248,7 +2248,9 @@ flow, and both matter:
 
 Both prompts (SAVE_PROMPT and FORGET_PROMPT, which has the same shape) now go
 through `openPrompt()`: it discards the queued input on entry and ignores
-keys for 900ms, one refresh plus margin.
+keys for 900ms, one refresh plus margin. Confirmed on hardware: the password
+saves, and a second entry into Sync auto-connects to the known network
+without scanning.
 
 Separately, and found while reading this path: `usedSavedPassword` and
 `autoConnectAttempted` are statics that outlive a sync session, and neither

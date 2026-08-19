@@ -243,21 +243,17 @@ number to keep watching.
 
 ## 11. Round eight: prompts, cursor, Pacman
 
-- [ ] Sync no longer reboots on entry (the abort was WiFi.setSleep(false),
+- [x] Sync no longer reboots on entry (the abort was WiFi.setSleep(false),
       illegal with BLE enabled -- removed).
-- [ ] "Save password?" stays on screen until *you* answer it, and answering
-      Enter means the network connects without asking next time.
-- [ ] The page still loads fully -- tabs work, files list.
-- [ ] No cursor block appears next to the sprites while Pacman runs, and the
-      cursor is back to normal at the prompt afterwards.
-- [ ] Pacman: one arrow press keeps him walking until he hits a wall; turning
-      at a junction works by pressing the direction slightly early.
-- [ ] The ghost patrols rather than pacing back and forth in place.
+- [x] "Save password?" stays on screen until *you* answer it, and answering
+      Enter means the network connects without asking next time. **Confirmed:
+      saved, and the second entry auto-connected without scanning at all.**
+- [x] The page loads fully -- tabs work, files list.
+- [x] No cursor block next to the sprites while Pacman runs.
+- [x] Pacman: one arrow press keeps him walking until he hits a wall.
+- [x] The ghost patrols rather than pacing back and forth in place.
 
-NOTE: this round is flashed as a **diagnostic build** -- `-DRELEASE_BUILD` is
-commented out in platformio.ini so the firmware's own logging reaches the
-serial port. It keeps the UART alive, which costs a little battery. Turn it
-back on once the sync flow is confirmed.
+`-DRELEASE_BUILD` is back on now that the sync flow is confirmed.
 
 ## 12. Regression check
 
