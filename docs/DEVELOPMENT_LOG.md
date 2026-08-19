@@ -2561,3 +2561,40 @@ spellings, strings clear, the program survives `CLEAR`, and `FOR`/`NEXT`,
 `CONT` stays documented rather than patched. That is not inconsistency: this
 fix only touches bytes the function already meant to zero, while `CONT`
 needs interpreter state saved and restored across a break.
+
+## Invaders piled up in the right corner
+
+Reported after the first hardware run. The cause is arithmetic, and the fix
+came from reconstructing the screen rather than from staring at the program:
+the harness emits VT52 that upstream's POSIX runtime converts to ANSI, so a
+short Python script can replay the escape stream into a 20x64 grid and print
+what the panel would have shown. The pile appeared at column 62, on the nose.
+
+The fleet is drawn as a 31-character string at `OX-1`, with `OX` bounded to
+34, so it reaches column 63. The band-clearing routine printed 60 spaces from
+column 2 — columns 2 to 61. Columns 62 and 63 were never cleared, so every
+time the fleet dropped from the right edge it left its rightmost invader
+behind, one per descent, stacking into a column.
+
+Now clears 1 to 63, which is exactly the span the fleet can occupy. Verified
+by replaying the screen again: empty.
+
+Worth noting the harness had to be rebuilt for this — the scratchpad does not
+survive between sessions. It is reproducible in about a minute from
+`../_backups/stefan-tinybasic.bundle` (the mirror `fetch.sh` mentions) plus
+the patched headers already in `editor/lib/TinyBasic/`, and the screen
+replayer is worth keeping the recipe for.
+
+## Pacing: the verdict, and where the games should go
+
+First hardware verdict on the real-time games: **tolerable, not good.** At
+roughly one frame per second that is the honest answer, and no amount of
+program-level cleverness changes it — the panel is the panel.
+
+Which points at the genre rather than the implementation. The right target is
+the ZX81-era puzzle game: push-the-crates, order-of-operations problems where
+the whole challenge is *thinking* and a move takes as long as it takes. There
+the second between frames is not latency, it is the pause while you look at
+the board. `lander.bas` and `forca.bas` already work on that principle; the
+next examples should lean the same way rather than trying to be arcade games
+on a display that cannot be one.

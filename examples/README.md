@@ -25,6 +25,18 @@ Ou use `VC`, que lista a pasta e carrega o escolhido.
 | `lander.bas` | qualquer | por turnos | `INPUT` numérico, aritmética de ponto flutuante |
 | `forca.bas` | qualquer | por turnos | `INPUT` de string, `READ`/`DATA`, `ASC`, substring |
 
+## Veredito do hardware
+
+Testado no aparelho: os dois jogos em tempo real ficaram **toleráveis, não
+bons**. A um quadro por segundo essa é a resposta honesta, e nenhuma
+esperteza no programa muda isso — o painel é o painel.
+
+O que isso indica é o gênero, não a implementação. O alvo certo é o
+quebra-cabeça no espírito do ZX81: empurrar caixas, problemas em que a
+*ordem* das jogadas decide se tem solução. Ali o segundo entre quadros não é
+espera, é o tempo de olhar o tabuleiro. `lander.bas` e `forca.bas` já
+funcionam assim.
+
 ## Uma nota sobre e-ink e ritmo
 
 O painel leva ~700ms por refresh, e o runtime espalha isso num intervalo de

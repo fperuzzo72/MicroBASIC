@@ -79,8 +79,11 @@
 740 NEXT
 745 RETURN
 750 REM ---- limpa a faixa de jogo (a frota desceu) ----
+755 REM 63 espacos a partir da coluna 1: a frota ocupa OX-1 ate
+756 REM OX+29, e OX chega a 34, entao ela alcanca a coluna 63.
+757 REM Limpar so ate a 61 deixava uma pilha presa na coluna 62.
 760 FOR I=3 TO 14
-770 LOCATE 2,I:PRINT "                                                            ";
+770 LOCATE 1,I:PRINT "                                                               ";
 780 NEXT
 790 RETURN
 800 REM ---- nave e placar ----

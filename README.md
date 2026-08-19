@@ -51,10 +51,15 @@ on the device and what is still open.
   (`GfxRenderer`/`EInkDisplay`, including a non-blocking `FAST_REFRESH` and
   an experimental windowed/partial refresh), SD card, webserver/OTA —
   copied into `editor/` here (see "Status" above), with the text editor
-  being swapped out for a BASIC line editor + interpreter over time. No
-  ongoing sync with MicroWriter upstream — its own future changes aren't
-  expected to be relevant to MicroBASIC's direction; anything that turns
-  out useful later gets ported over deliberately instead.
+  being swapped out for a BASIC line editor + interpreter over time.
+
+  There is no ongoing sync *from* MicroWriter — its own future changes
+  aren't expected to be relevant to MicroBASIC's direction. The traffic
+  runs the other way: MicroBASIC is all of MicroWriter plus additions, so
+  a bug found in shared code here is a bug there, and this project
+  exercises that code harder (more RAM pressure, far more time on the sync
+  screen). Fixes get ported back to MicroWriter deliberately, one at a
+  time, with a note in both development logs saying what moved and why.
 - **Interpreter**: [Stefan Lenz's IoT BASIC](https://github.com/slviajero/tinybasic)
   — line-numbered, tokenised, no `malloc` (its program memory is one static
   array), and closer to a 1980s BASIC than anything else that fits. It is
