@@ -516,7 +516,10 @@ static void executeLogicalLine(const char* line) {
     // since before the interpreter existed.
     screenEditorStartNewInputLine();
     tbExecuteLine("CATALOG");
-    screenEditorStartNewInputLine();
+    // Same rule as the interpreter path below: only break the line if it was
+    // left mid-row. CATALOG ends with its own newline, so advancing here too
+    // left a blank row that plain CATALOG didn't have.
+    if (screenEditorGetCursorCol() != 0) screenEditorStartNewInputLine();
     return;
   }
   if (const char* arg = wordArg("SCREEN")) {
@@ -535,7 +538,9 @@ static void executeLogicalLine(const char* line) {
         screenEditorSetMode(mode);
       }
     }
-    screenEditorStartNewInputLine();
+    // As above. Switching mode clears the screen and homes the cursor, so
+    // advancing unconditionally here left row 0 blank and started on row 1.
+    if (screenEditorGetCursorCol() != 0) screenEditorStartNewInputLine();
     return;
   }
 

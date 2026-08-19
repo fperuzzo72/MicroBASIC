@@ -176,11 +176,17 @@ void screenEditorBackspace() {
   int cols = screenEditorCols();
   if (cursorCol > 0) {
     cursorCol--;
-  } else if (cursorRow > 0) {
+  } else if (cursorRow > 0 && rowIsContinuation[cursorRow]) {
+    // Only cross the row boundary when this row is the wrapped tail of the one
+    // above, i.e. they are one logical line and the character before the
+    // cursor really is up there. On a line the user started fresh, backspace
+    // at column 0 must do nothing -- otherwise it walks back into, and eats,
+    // whatever unrelated text happens to be on the previous row.
+    rowIsContinuation[cursorRow] = false;
     cursorRow--;
     cursorCol = cols - 1;
   } else {
-    return;  // already at the very first cell
+    return;
   }
   grid[cursorRow][cursorCol] = ' ';
 }

@@ -1770,3 +1770,75 @@ limitation were diagnosed -- in seconds, with full visibility of interpreter
 state, instead of build/flash/observe cycles on the device. Given how much of
 this project's time has gone into hardware debugging loops, anything answerable
 this way should be.
+
+
+## Second hardware round: SAVE, backspace, stray blank lines, and why CONT fails
+
+### SAVE wrote a 0-byte file
+
+`xsave()` doesn't write to a file handle. It does `od = OFILE` and then
+*prints* the program through `outch()`, the same call `PRINT` uses. Our
+`outch()` ignored `od` entirely and always wrote to the terminal, so SAVE
+listed the program on screen and left an empty file on the card.
+
+Fixed by dispatching on `od`: `OFILE` writes raw bytes to the open output
+file, `OSERIAL` does the terminal translation (newline, form feed, the
+`charcount` column tracking), and every other channel is discarded since
+nothing is attached. Deliberately *not* copied from upstream's version: its
+`outch()` ends with `byield()` "for fuzzy OSes", and here `byield()` carries a
+`vTaskDelay` and a display flush, so paying that per character would make
+output crawl.
+
+### Backspace crossed row boundaries on unrelated lines
+
+`screenEditorBackspace()` went up to the previous row whenever the cursor was
+at column 0. That's right for a line that wrapped while typing -- the previous
+character genuinely is up there -- but wrong on a freshly started line, where
+it walked back into and ate whatever text happened to be above.
+
+The continuation flags added earlier for the logical-line fix already carry
+exactly the information needed, so this became a one-condition change: only
+cross the boundary when `rowIsContinuation[cursorRow]`.
+
+### Two more stray blank lines
+
+Same cause as the one fixed for program entry: advancing the terminal
+unconditionally after a command that ends its own output. `SCREEN n` (which
+clears the screen and homes the cursor) and the `FILES` alias both did it.
+Both now use the same "only advance if the cursor was left mid-row" check.
+
+### CONT: an interpreter bug, diagnosed on the host
+
+`CONT` after a Ctrl+C break reported "20: Syntax Error" on a two-line program.
+Reproduced on the host harness by adding a counter to `checkch()` that fires a
+break after N statements, then sweeping N -- which made it deterministic:
+
+    break at here=3  -> CONT resumes cleanly
+    break at here=4  -> "10: Syntax Error"
+    break at here=12 -> CONT resumes cleanly
+    break at here=13 -> "20: Syntax Error"
+
+The cause is in the interpreter's own execution loop. It keeps one token lexed
+ahead: `token` holds the current one while `here` already points *past* it.
+The break path returns without preserving `token`, and `CONT` then calls
+`nexttoken()`, which re-reads from `here` -- so one token is silently skipped.
+When the skipped token is a line number it costs nothing, because the
+statement loop skips those anyway (`case LINENUMBER: nexttoken()`), which is
+why half the break positions resume fine. When it is a statement keyword,
+execution resumes inside that statement's arguments and fails to parse.
+
+This is upstream's, not ours: the same flow exists in its own `basicLoop()`,
+and the reproduction uses upstream's own runtime. Fixing it means saving
+`token` at break time and restoring it on `CONT` -- a change to interpreter
+internals rather than to configuration or glue, so it hasn't been made
+unilaterally. Documented as a known limitation; `RUN` restarts fine.
+
+### Dialect confirmations from this round
+
+- `LIST b,e` lists a range; `LIST n` lists only line n. The user's read is
+  that this is the better behaviour -- a single argument now unambiguously
+  means "that line" -- and it matches MSX, where "from n onwards" was its own
+  form. `LIST 20,200` on a program ending at line 30 simply stops at 30.
+- `PRINT "x"` breaks the line and `PRINT "x";` does not, exactly as classic
+  BASIC. Not a bug, just a forgotten detail.
+- Variables persist between direct-mode statements, as expected.

@@ -114,26 +114,27 @@ Confirmed working on hardware already: program entry, `LIST` with correct line
 numbers, `RUN`, Ctrl+C to break, variables persisting between direct-mode
 statements (`A=5` then `PRINT A+B`), `CLS` clearing the screen.
 
+Confirmed on hardware since: `CLS`, `SCREEN` switching, `MENU`, `CATALOG`,
+`FILES`, `LOAD`, loading via `VC`, and `LIST` with correct line numbers.
+
+Fixed after that round, needs retest:
+
+- [ ] `SAVE "x"` now actually writes the file. It was producing 0 bytes
+      because SAVE works by setting the output channel to `OFILE` and
+      *printing* the program through `outch()`, and `outch()` ignored the
+      channel and always wrote to the screen. Check the file has content and
+      is readable plain text on a PC, and that `LOAD` brings it back.
+- [ ] Backspace at column 0 no longer walks up into the previous row unless
+      that row is genuinely the wrapped continuation of it. Type two separate
+      lines, put the cursor at the start of the second, press Backspace: the
+      line above must be left alone.
+- [ ] `SCREEN n` and `FILES` no longer leave a blank line after running.
+
 Still to check:
 
-- [ ] `CLS` leaves the cursor on the **first** row, not the second. (Reported
-      as landing on row 2, but that test predates the blank-line fix, and the
-      interpreter provably emits nothing after the form feed — verified byte
-      for byte on the host harness. Retest.)
-- [ ] `LIST 10,60` lists that range; `LIST 10` lists **only** line 10. Note
-      this differs from the old behaviour, where `LIST 30` meant "from 30 to
-      the end".
-- [ ] `PRINT "oi";` (trailing semicolon) glues output onto one line, while
-      `PRINT "oi"` breaks the line. Both are correct classic behaviour.
-- [ ] `SAVE "x"` / `LOAD "x"` now go through the interpreter's own commands
-      into `/MicroBASIC/programs/`. Check a program round-trips, and that the
-      file is still readable plain text on a PC.
-- [ ] `CATALOG` (and its `FILES` alias) lists that directory.
 - [ ] `NEW` empties the program; `LIST` after it shows nothing.
-- [ ] `VC` still loads correctly — it now issues `LOAD` to the interpreter
-      rather than loading into the old store.
-- [ ] `CONT` after a Ctrl+C break resumes (this interpreter has STOP/CONT,
-      which My-Basic never did).
+- [ ] `VC` in each of SCREEN 0/1/2/3 — the layout is computed rather than
+      hand-laid and has still never been seen in modes other than the default.
 - [ ] Long `RUN` output still repaints as it goes (the runtime's `byield()`
       flushes the display every 500ms).
 
@@ -148,6 +149,20 @@ Still to check:
   `inch()`, and line editing here belongs to the screen editor. Needs the
   same "hand a finished line over" bridge that Enter already uses.
 - `LIST` no longer paginates with `MORE?` — it scrolls, as MSX did.
+- `LIST n` lists **only** line n; use `LIST b,e` for a range. Deliberate:
+  it matches MSX, where "from n onwards" was a separate form, and makes the
+  single-argument case unambiguous.
+- `CONT` after a break often fails with a syntax error. Diagnosed on the host
+  harness and it is an interpreter bug, not an integration one: the execution
+  loop keeps one token lexed ahead of `here`, and the break path discards it,
+  so `CONT`'s `nexttoken()` re-reads from `here` and *skips a token*. When the
+  skipped token is a line number nothing is lost (those cases resume fine);
+  when it is a statement keyword, execution resumes inside that statement's
+  arguments and errors. Reproducible deterministically: breaking at
+  `here`=3 or 12 resumes cleanly, at 4 or 13 gives "10:"/"20: Syntax Error".
+  Fixing it means saving `token` at break and restoring it on `CONT` --
+  a change to interpreter internals, deliberately not made unilaterally.
+  Use `RUN` to restart in the meantime.
 
 RAM is at ~55%, flash at ~27.5% (down from 31.7% once My-Basic's code left the
 binary). BLE needs a 20KB contiguous allocation at connect time, so RAM is the

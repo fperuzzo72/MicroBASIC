@@ -56,15 +56,42 @@ uint8_t vt52active = 0;
 // rather than left at zero.
 uint8_t charcount[5] = {0, 0, 0, 0, 0};
 
+// Open file handles. Declared up here rather than next to the filesystem
+// functions below because outch() needs `ofile`: SAVE writes by switching the
+// output channel to OFILE and printing through outch().
+static FsFile ifile;      // open for reading
+static FsFile ofile;      // open for writing
+static FsFile rootDir;    // directory walk
+static FsFile rootEntry;  // current entry in that walk
+static char rootNameBuf[MAX_FILENAME_LEN];
+
 // ---------------------------------------------------------------------------
 // Console I/O -> the SCREEN 0-3 terminal
 // ---------------------------------------------------------------------------
 
+// Writes one character to whichever channel `od` currently selects. Getting
+// this wrong is not cosmetic: SAVE works by setting `od = OFILE` and then
+// *printing* the program through outch(), so an outch() that always wrote to
+// the screen produced a listing on the terminal and a 0-byte file on the SD
+// card -- which is exactly what happened before this dispatched on `od`.
+//
+// Deliberately unlike upstream's own outch(), this does not call byield() per
+// character. Upstream does that "for fuzzy OSes"; here byield() carries a
+// vTaskDelay and a display flush, and paying that per character would make
+// output crawl.
 void outch(char c) {
+  if (od == OFILE) {
+    // Raw passthrough: a saved program is plain text and must keep its real
+    // line endings, so none of the terminal translation below applies.
+    if (ofile) ofile.write((const uint8_t*)&c, 1);
+    return;
+  }
+  if (od != OSERIAL) return;  // printer, wire, radio, MQTT: nothing attached
+
   if (c == '\r') return;  // terminal treats '\n' alone as end of line
   if (c == '\n') {
     screenEditorStartNewInputLine();
-    charcount[od > 0 && od < 5 ? od : 0] = 0;
+    charcount[OSERIAL] = 0;
     return;
   }
   // Form feed is how the interpreter implements CLS -- its TCLS case is
@@ -77,7 +104,7 @@ void outch(char c) {
   }
   const char s[2] = {c, '\0'};
   screenEditorTermPrint(s);
-  if (od >= 0 && od < 5) charcount[od]++;
+  charcount[OSERIAL]++;
 }
 
 void outs(char* s, uint16_t l) {
@@ -186,11 +213,6 @@ long freememorysize() { return freeRam(); }
 
 static const char* TB_DIR = "/MicroBASIC/programs";
 
-static FsFile ifile;      // open for reading
-static FsFile ofile;      // open for writing
-static FsFile rootDir;    // directory walk
-static FsFile rootEntry;  // current entry in that walk
-static char rootNameBuf[MAX_FILENAME_LEN];
 
 // Builds a path inside the programs directory, applying the same rules as
 // SAVE/LOAD: name as typed, lower-cased, no separators. Keeping this identical
