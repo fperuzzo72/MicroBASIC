@@ -2804,3 +2804,60 @@ saídas.
   como está. Registrado porque a ausência do banner foi o sinal que
   identificou o autoexec como causa de toda a confusão da tarde; vale saber
   que ele significa "existe um autoexec no cartão", e não "algo falhou".
+
+## Game Buttons: girar o d-pad para os programas
+
+Item novo em Settings, entre "Font Size" e "Bluetooth":
+
+    Game Buttons     As labelled | Rotated
+
+Ligado, cada botao fisico manda a seta que ele realmente **aponta na tela**:
+
+    DIREITA fisica -> cima          CIMA   fisica -> esquerda
+    BAIXO   fisica -> direita       ESQUERDA fisica -> baixo
+
+O mapa foi medido no aparelho pelo usuario, nao deduzido: o editor de tela
+forca paisagem (LANDSCAPE_CCW) enquanto o d-pad esta fisicamente na lateral,
+entao a rotacao entre um e outro nao se descobre lendo codigo.
+
+Vale **so enquanto um programa BASIC executa** -- e o unico ponto por onde os
+botoes alcancam um programa (`pumpPhysicalButtonsForProgram`). Menus, editores
+e navegacao ficam intocados, por escolha explicita do usuario: ali a
+consistencia da interface importa mais do que os botoes apontarem para o lado
+certo depois de rotacionar a tela.
+
+A ideia do ajuste em Settings foi do usuario e e melhor do que a minha, que
+era fixar no codigo: a decisao fica com quem joga, e muda sem regravar
+firmware.
+
+## A data no vCodex: duas hipoteses minhas, as duas refutadas
+
+Registrado porque o resultado util aqui foi negativo, e um negativo bem
+estabelecido evita que alguem repita o caminho.
+
+**Hipotese 1: "lemos a bateria no GPIO 0, que e o SCL do I2C".** Verdadeira
+para o X3 e falsa para o X4. O firmware do leitor decide em tempo de
+execucao:
+
+    if (gpio.deviceIsX3()) { Wire.begin(X3_I2C_SDA, X3_I2C_SCL, ...); }
+    else                   { pinMode(BAT_GPIO0, INPUT); }
+
+No X4 ele le a bateria **do mesmo GPIO 0 que nos lemos**. Nao ha conflito, e
+o medidor BQ27220 e o DS3231 sao hardware do X3.
+
+Cheguei a trocar a leitura para I2C e gravar essa versao no aparelho antes de
+verificar. Foi o usuario que mandou conferir como o leitor faz, e a
+verificacao derrubou a mudanca. Revertida.
+
+**Hipotese 2: "deixamos o pad em modo analogico e o leitor se identifica
+errado como X3".** Improvavel: a deteccao roda duas passagens, exige 2 de 3
+chips respondendo nas duas, e o resultado e **cacheado em NVS** -- a sondagem
+nao se repete a cada boot.
+
+Ou seja: **nao ha mecanismo conhecido** para a data ir a 26/08/2101 ao voltar
+do MicroBASIC. O caminho honesto e medir, nao deduzir: o log do leitor imprime
+`Using cached device type` e os escores da sondagem no arranque, e o NVS dele
+guarda o tipo detectado e o estado do relogio. Capturar esse boot depois de
+uma volta pelo MicroBASIC responde de uma vez se ele se acha um X3.
+
+Nao mexer mais nesse pino sem essa evidencia.

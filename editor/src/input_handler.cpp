@@ -23,6 +23,7 @@ extern bool deleteConfirmPending;
 extern WritingMode writingMode;
 extern FontSize fontSize;
 extern bool showWordCount;
+extern bool remapButtonsInPrograms;
 
 // External functions
 void storePairedDevice(const std::string& address, const std::string& name);
@@ -669,7 +670,7 @@ static void dispatchEvent(const KeyEvent& event) {
       break;
 
     case UIState::SETTINGS: {
-      const int SETTINGS_COUNT = 6;  // Orientation, Dark Mode, Writing Mode, Font Size, Bluetooth, Paired Keyboards
+      const int SETTINGS_COUNT = 7;  // Orientation, Dark Mode, Writing Mode, Font Size, Game Buttons, Bluetooth, Paired Keyboards
 
       // Up/Down: navigate settings list (physical buttons also map here)
       if (event.keyCode == HID_KEY_DOWN) {
@@ -693,8 +694,10 @@ static void dispatchEvent(const KeyEvent& event) {
           int v = static_cast<int>(fontSize);
           fontSize = static_cast<FontSize>((v + 1) % 3);
         } else if (settingsSelection == 4) {
-          currentState = UIState::BLUETOOTH_SETTINGS;
+          remapButtonsInPrograms = !remapButtonsInPrograms;
         } else if (settingsSelection == 5) {
+          currentState = UIState::BLUETOOTH_SETTINGS;
+        } else if (settingsSelection == 6) {
           pairedKeyboardSelection = 0;
           currentState = UIState::PAIRED_KEYBOARDS;
         }
@@ -713,6 +716,8 @@ static void dispatchEvent(const KeyEvent& event) {
         } else if (settingsSelection == 3) {
           int v = static_cast<int>(fontSize);
           fontSize = static_cast<FontSize>((v - 1 + 3) % 3);
+        } else if (settingsSelection == 4) {
+          remapButtonsInPrograms = !remapButtonsInPrograms;
         }
         screenDirty = true;
 

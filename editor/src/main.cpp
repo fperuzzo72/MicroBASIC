@@ -86,6 +86,13 @@ WritingMode writingMode = WritingMode::NORMAL;
 FontSize fontSize = FontSize::LARGE;
 bool showWordCount = true;
 
+// Gira os botoes fisicos 90 graus para os programas BASIC. O editor de tela
+// roda em paisagem enquanto o d-pad esta fisicamente na lateral, entao num
+// jogo os botoes apontam para as direcoes erradas do campo. Vale SO enquanto
+// um programa executa: nos menus e nos editores a consistencia da interface
+// importa mais do que a geografia dos botoes.
+bool remapButtonsInPrograms = false;
+
 // --- OTA App Detection ---
 OtaAppEntry otaApps[MAX_OTA_APPS];
 int otaAppCount = 0;
@@ -308,6 +315,7 @@ void setup() {
   writingMode = static_cast<WritingMode>(uiPrefs.getUChar("writeMode", 0));
   fontSize = static_cast<FontSize>(uiPrefs.getUChar("fontSize", 2));
   showWordCount = uiPrefs.getBool("showWC", true);
+  remapButtonsInPrograms = uiPrefs.getBool("btnRemap", false);
 
   // Apply saved orientation
   applyOrientationToRenderer(currentOrientation);
@@ -484,10 +492,19 @@ void pumpPhysicalButtonsForProgram() {
     enqueueKeyEvent(k, 0, true);
     enqueueKeyEvent(k, 0, false);
   };
-  if (u && !lu) fire(HID_KEY_UP);
-  if (d && !ld) fire(HID_KEY_DOWN);
-  if (l && !ll) fire(HID_KEY_LEFT);
-  if (r && !lr) fire(HID_KEY_RIGHT);
+
+  // Com o remap ligado, cada botao manda a seta que ele realmente aponta na
+  // tela em paisagem, medido no aparelho: direita->cima, cima->esquerda,
+  // baixo->direita, esquerda->baixo. Sem ele, 1:1 com o nome do botao.
+  const uint8_t kUp    = remapButtonsInPrograms ? HID_KEY_LEFT  : HID_KEY_UP;
+  const uint8_t kDown  = remapButtonsInPrograms ? HID_KEY_RIGHT : HID_KEY_DOWN;
+  const uint8_t kLeft  = remapButtonsInPrograms ? HID_KEY_DOWN  : HID_KEY_LEFT;
+  const uint8_t kRight = remapButtonsInPrograms ? HID_KEY_UP    : HID_KEY_RIGHT;
+
+  if (u && !lu) fire(kUp);
+  if (d && !ld) fire(kDown);
+  if (l && !ll) fire(kLeft);
+  if (r && !lr) fire(kRight);
   if (c && !lc) fire(HID_KEY_ENTER);
   // Physical Back breaks a running program, the same gesture Escape gives a
   // BLE keyboard. Without it, the only way out of a program with no exit was
@@ -1026,6 +1043,7 @@ void loop() {
     uiPrefs.putUChar("writeMode", static_cast<uint8_t>(writingMode));
     uiPrefs.putUChar("fontSize", static_cast<uint8_t>(fontSize));
     uiPrefs.putBool("showWC", showWordCount);
+    uiPrefs.putBool("btnRemap", remapButtonsInPrograms);
     lastSavedOrientation = currentOrientation;
     lastSavedDarkMode = darkMode;
     lastSavedWritingMode = writingMode;

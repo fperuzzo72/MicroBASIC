@@ -24,6 +24,7 @@ extern bool deleteConfirmPending;
 extern WritingMode writingMode;
 extern FontSize fontSize;
 extern bool showWordCount;
+extern bool remapButtonsInPrograms;
 
 // External functions
 uint32_t getCurrentPasskey();
@@ -640,9 +641,10 @@ void drawSettingsMenu(GfxRenderer& renderer, HalGPIO& gpio) {
 
   // Setting items: Orientation, Dark Mode, Writing Mode, Font Size, Bluetooth, Paired Keyboards
   static const char* labels[] = {
-    "Orientation", "Dark Mode", "Writing Mode", "Font Size", "Bluetooth", "Paired Keyboards"
+    "Orientation", "Dark Mode", "Writing Mode", "Font Size",
+    "Game Buttons", "Bluetooth", "Paired Keyboards"
   };
-  const int SETTINGS_COUNT = 6;
+  const int SETTINGS_COUNT = 7;
 
   // Compute line height to fit all items — use smaller spacing if needed.
   // Default matches FONT_UI's real glyph extent (ascender+descender) with
@@ -690,7 +692,11 @@ void drawSettingsMenu(GfxRenderer& renderer, HalGPIO& gpio) {
         case FontSize::MEDIUM: strcpy(val, "Medium"); break;
         default:               strcpy(val, "Large"); break;
       }
-    } else if (i == 5) {
+    } else if (i == 4) {
+      // Girados 90 graus para a paisagem do editor de tela, e so enquanto um
+      // programa BASIC executa. Ver remapButtonsInPrograms em main.cpp.
+      strcpy(val, remapButtonsInPrograms ? "Rotated" : "As labelled");
+    } else if (i == 6) {
       int kbCount = getPairedKeyboardCount();
       if (kbCount == 0) strcpy(val, "None");
       else if (kbCount == 1) strcpy(val, "1 keyboard");
