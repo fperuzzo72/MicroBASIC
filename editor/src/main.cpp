@@ -337,11 +337,13 @@ void setup() {
       int wm = jsonGetInt(uiBuf, "writeMode");
       int fs = jsonGetInt(uiBuf, "fontSize");
       int wc = jsonGetInt(uiBuf, "showWC");
+      int br = jsonGetInt(uiBuf, "btnRemap");
       if (o  >= 0) { uiPrefs.putUChar("orient",    (uint8_t)o);  currentOrientation = static_cast<Orientation>(o); }
       if (d  >= 0) { uiPrefs.putBool("darkMode",   d != 0);      darkMode           = (d != 0); }
       if (wm >= 0) { uiPrefs.putUChar("writeMode", (uint8_t)wm); writingMode        = static_cast<WritingMode>(wm); }
       if (fs >= 0) { uiPrefs.putUChar("fontSize",  (uint8_t)fs); fontSize           = static_cast<FontSize>(fs); }
       if (wc >= 0) { uiPrefs.putBool("showWC",     wc != 0);     showWordCount      = (wc != 0); }
+      if (br >= 0) { uiPrefs.putBool("btnRemap",   br != 0);     remapButtonsInPrograms = (br != 0); }
       // Re-apply orientation in case it changed
       applyOrientationToRenderer(currentOrientation);
       DBG_PRINTLN("UI prefs restored from SD backup");
@@ -1035,9 +1037,11 @@ void loop() {
   static WritingMode lastSavedWritingMode = writingMode;
   static FontSize lastSavedFontSize = fontSize;
   static bool lastSavedShowWordCount = showWordCount;
+  static bool lastSavedRemapButtons = remapButtonsInPrograms;
   if (currentOrientation != lastSavedOrientation || darkMode != lastSavedDarkMode
       || writingMode != lastSavedWritingMode || fontSize != lastSavedFontSize
-      || showWordCount != lastSavedShowWordCount) {
+      || showWordCount != lastSavedShowWordCount
+      || remapButtonsInPrograms != lastSavedRemapButtons) {
     uiPrefs.putUChar("orient", static_cast<uint8_t>(currentOrientation));
     uiPrefs.putBool("darkMode", darkMode);
     uiPrefs.putUChar("writeMode", static_cast<uint8_t>(writingMode));
@@ -1049,12 +1053,15 @@ void loop() {
     lastSavedWritingMode = writingMode;
     lastSavedFontSize = fontSize;
     lastSavedShowWordCount = showWordCount;
+    lastSavedRemapButtons = remapButtonsInPrograms;
     // Keep SD backup in sync so settings survive a firmware flash
     static char uiBuf[128];
     snprintf(uiBuf, sizeof(uiBuf),
-             "{\"orient\":%d,\"dark\":%d,\"writeMode\":%d,\"fontSize\":%d,\"showWC\":%d}",
+             "{\"orient\":%d,\"dark\":%d,\"writeMode\":%d,\"fontSize\":%d,"
+             "\"showWC\":%d,\"btnRemap\":%d}",
              (int)currentOrientation, darkMode ? 1 : 0,
-             (int)writingMode, (int)fontSize, showWordCount ? 1 : 0);
+             (int)writingMode, (int)fontSize, showWordCount ? 1 : 0,
+             remapButtonsInPrograms ? 1 : 0);
     ensureSettingsDir();
     sdWriteFile("/MicroBASIC/ui_prefs.json", uiBuf);
   }

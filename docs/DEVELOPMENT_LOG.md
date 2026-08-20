@@ -2861,3 +2861,39 @@ guarda o tipo detectado e o estado do relogio. Capturar esse boot depois de
 uma volta pelo MicroBASIC responde de uma vez se ele se acha um X3.
 
 Nao mexer mais nesse pino sem essa evidencia.
+
+### Os botoes do X4, fisicamente
+
+Levantado pelo usuario, e vale registrado porque nao se descobre lendo
+codigo -- os nomes no `InputManager` dizem a funcao, nao a posicao.
+
+Olhando o aparelho em **portrait**:
+
+- Abaixo da tela, duas barrinhas rocker. Cada uma e **dois** botoes sob uma
+  mesma pecinha:
+  - barrinha da esquerda: **BACK | ENTER**
+  - barrinha da direita: **ESQUERDA | DIREITA**
+- Na lateral direita, de cima para baixo: **POWER**, depois **CIMA** e
+  **BAIXO**, e por fim **RESET**.
+
+No editor de tela (LANDSCAPE_CCW) as duas barrinhas de baixo passam para a
+direita da tela. E dai que vem a necessidade do "Game Buttons": os quatro
+direcionais estao distribuidos entre duas barrinhas em orientacoes
+diferentes, e nenhuma delas aponta para onde o nome do botao diz depois da
+rotacao.
+
+### O ajuste nao gravava
+
+Reportado: mudar para "Rotated", sair, reiniciar, e encontrar "As labelled"
+de volta -- e a rotacao nao funcionando no jogo.
+
+Uma causa so para os dois sintomas. Eu acrescentei a *escrita* do valor no
+bloco de persistencia mas nao o incluí na *condicao* que dispara esse bloco,
+que compara cada ajuste com o seu "ultimo salvo". Mudando apenas este item,
+nenhuma comparacao mudava e a gravacao nunca acontecia. E como o usuario
+precisou reiniciar para carregar o Sokoban (esta sem teclado), o valor ja
+tinha voltado a falso antes do jogo comecar -- por isso a rotacao "tambem"
+nao funcionou. Nao eram dois defeitos.
+
+Aproveitado para incluir o item no backup em `/MicroBASIC/ui_prefs.json`,
+como os outros ajustes, para sobreviver a uma regravacao de firmware.
