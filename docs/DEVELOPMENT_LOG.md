@@ -2967,7 +2967,7 @@ Mitigacao e nao correcao: a causa e o layout da memoria RTC diferir entre
 binarios, e disso nao ha como escapar de fora. O que da para fazer e nao
 entregar um numero que a heuristica do outro lado aceite.
 
-## Timestamp dos arquivos no SD: por que nao existe (achado, nao implementado)
+## Timestamp dos arquivos no SD (levantamento -- implementado depois, ver adiante)
 
 Levantado depois de fechar a data do vCodex, e **deliberadamente nao
 implementado** -- registrado aqui validado e pronto, para a decisao ser
@@ -3055,3 +3055,45 @@ o resultado; nao tentar de novo a cada arquivo gravado.
   1980..2107 sobre o valor lido antes de confiar nele. Um `lastKnownValid`
   de 0 -- que e o valor inicial do leitor -- tem de cair no fallback, nao
   virar 1970.
+
+### Implementado
+
+Feito, em `editor/src/sd_datetime.{h,cpp}`, seguindo a opcao 3 com o
+tratamento de ausencia que o usuario pediu. Registrado uma vez no arranque,
+logo apos `fileManagerSetup()`.
+
+A data vem de `lastKnownValidTimestamp` em `/.crosspoint/state.json`, e cai
+para a data de compilacao quando o arquivo nao existe, nao abre, nao tem o
+campo, tem o campo em 0, ou tem um valor implausivel. Nenhum desses e erro:
+nao ha mensagem na tela nem recusa em gravar.
+
+Tres decisoes que vale explicar, porque nenhuma e obvia:
+
+**Varredura byte a byte em vez de carregar o arquivo.** O state.json do leitor
+tem varios KB, e bloco contiguo de heap ja foi problema serio neste firmware.
+Roda uma vez, entao a lentidao nao importa.
+
+**Acumulacao propria em uint32 em vez do `jsonGetInt()` do projeto.** Aquele
+usa `atoi()`, que devolve `int`; o epoch corrompido de 4154457600 estoura e
+vira lixo com sinal. Lendo em uint32 ele chega inteiro e e recusado pela
+faixa, que e o comportamento que se quer.
+
+**Teto de plausibilidade, que o leitor nao tem.** A validacao dele so tem piso
+(`>= 2024-01-01`), e foi exatamente isso que deixou o 2101 entrar e ser
+gravado pelo `std::max`. Copiar a heuristica dele seria herdar o defeito: se
+lessemos aquele arquivo depois da corrupcao, *todos* os nossos arquivos
+ficariam em 2101. O teto e o ano de compilacao mais vinte -- uma data decadas
+a frente do firmware que a esta lendo nao e uma data.
+
+**Nao mexe no relogio de sistema.** Guarda a base numa variavel e soma
+`millis()`. Escrever o relogio moveria a referencia na memoria RTC, que e a
+origem de toda a confusao da data (secao anterior).
+
+Duas verificacoes fora do aparelho pegaram defeitos antes de gravar: a
+primeira versao de `compileDate()` passava a string inteira (`"Aug 20 2026"`)
+para `strstr()` procurar na tabela de meses, nunca casava, e **todo arquivo
+sairia em janeiro**; e sem o teto, o epoch de 2101 era aceito.
+
+Testado somente contra o CPR-vCodex. CrossPoint e CrossInk nao foram
+verificados e provavelmente nao mantem nada parecido -- por isso a ausencia
+do arquivo e caso normal, e nao excecao.

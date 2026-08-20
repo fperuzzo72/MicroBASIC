@@ -18,6 +18,7 @@
 #include "file_manager.h"
 #include "ui_renderer.h"
 #include "wifi_sync.h"
+#include "sd_datetime.h"
 
 #include <sys/time.h>  // settimeofday(), na entrega para outra particao
 #include "screen_editor.h"
@@ -357,6 +358,7 @@ void setup() {
   editorInit();
   inputSetup();
   fileManagerSetup();
+  sdDateTimeSetup();  // data dos arquivos no SD -- ver sd_datetime.h
 
   // Migrate the settings/backup dir before anything reads or writes it
   // (BLE pairing, WiFi credentials, UI prefs below all live under it).
