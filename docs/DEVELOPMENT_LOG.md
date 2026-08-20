@@ -3026,9 +3026,21 @@ Melhor que 1980, e ainda assim nao e a data real.
 `lastKnownValidTimestamp` em `/.crosspoint/state.json`, no mesmo cartao (ver a
 secao anterior). Da para ler esse campo no arranque e usar como base do
 callback -- e dado do proprio dispositivo, nao invencao nossa, e seria a data
-real dentro de um dia. O custo e criar dependencia do formato de um arquivo
-que nao e nosso: se ele mudar o esquema, calamos ou erramos em silencio.
-Mitigavel validando a faixa antes de usar, e caindo na opcao 2 se falhar.
+real dentro de um dia.
+
+O custo e criar dependencia de um arquivo que nao e nosso, e a leitura tem de
+ser escrita partindo do principio de que **ele pode simplesmente nao existir**:
+
+- cartao novo, ou formatado;
+- MicroBASIC usado sozinho, sem o leitor nunca ter rodado ali;
+- o leitor presente mas nunca sincronizado, com o campo em 0;
+- o arquivo existindo com esquema diferente numa versao futura dele.
+
+Em todos esses casos o comportamento correto e o mesmo: **ignorar e seguir**,
+caindo na opcao 2. Nada de erro na tela, nada de recusar gravar o arquivo --
+uma data de arquivo e informacao acessoria, e falhar barulhentamente por
+causa dela seria pior que a ausencia dela. Ler uma vez no arranque e guardar
+o resultado; nao tentar de novo a cada arquivo gravado.
 
 ### Se um dia for implementar
 
@@ -3038,3 +3050,8 @@ Mitigavel validando a faixa antes de usar, e caindo na opcao 2 se falhar.
 - Validar 1980..2107 antes de escrever; fora disso a FAT nao representa.
 - Vale conferir se o campo de criacao (`creationDate`) tambem interessa --
   o trecho acima so cobre modificacao e acesso.
+- Indo pela opcao 3: checar existencia antes de abrir, tratar leitura vazia,
+  JSON malformado e campo ausente como "sem data", e validar a faixa
+  1980..2107 sobre o valor lido antes de confiar nele. Um `lastKnownValid`
+  de 0 -- que e o valor inicial do leitor -- tem de cair no fallback, nao
+  virar 1970.
