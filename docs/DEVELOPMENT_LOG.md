@@ -3097,3 +3097,37 @@ sairia em janeiro**; e sem o teto, o epoch de 2101 era aceito.
 Testado somente contra o CPR-vCodex. CrossPoint e CrossInk nao foram
 verificados e provavelmente nao mantem nada parecido -- por isso a ausencia
 do arquivo e caso normal, e nao excecao.
+
+### A hora fica 3h adiantada (conhecido, nao corrigido)
+
+Testado no aparelho: a **data** sai certa, mas a **hora** vem adiantada pelo
+fuso -- 19h47 gravado quando eram 16h47 locais, exatamente UTC-3.
+
+A causa e uma linha: usamos `gmtime_r()`, que da UTC, e a FAT guarda **hora
+local** por convencao. O leitor faz certo:
+
+    TimeUtils::configureTimezone();          // setenv("TZ", ...); tzset();
+    localtime_r(&currentTime, &localTime);
+
+Corrigir exige o fuso, e e ai que a coisa para de ser barata. O ajuste do
+leitor guarda apenas o **indice** do fuso (`timeZonePreset` em
+`/.crosspoint/settings.json`), nunca a string POSIX. A tabela que traduz
+indice em string vive so no binario dele
+(`src/util/TimeZoneRegistry.cpp`, 30 entradas).
+
+Ou seja, para ler o fuso dele terismos de **copiar a tabela** -- e herdar um
+modo de falha desagradavel: se o leitor inserir ou reordenar um fuso, nossos
+indices passam a significar outra coisa **em silencio**. Nada quebra, nada
+avisa, os arquivos so passam a ter hora de outro continente. E o mesmo tipo de
+acoplamento invisivel que ja nos custou caro nesta sessao.
+
+Chegou a ser implementado e foi revertido por decisao do usuario. Fica assim:
+**data certa, hora adiantada pelo fuso.** Para ordenar arquivos nao muda nada,
+que era o objetivo original.
+
+Se um dia valer, as opcoes sao: copiar a tabela aceitando o risco de deriva
+(e conferir o tamanho dela ao portar -- se nao forem 30 entradas, ja
+divergiu); ou um ajuste de fuso proprio nos Settings do MicroBASIC,
+independente mas mais uma coisa para manter. Assumir UTC-3 fixo nao vale: e a
+constante que funciona hoje e mente quando muda o horario de verao ou o
+aparelho troca de pais.
