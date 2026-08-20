@@ -27,6 +27,9 @@
 #include "input_handler.h"
 #include "tb_bridge.h"
 
+// Defined in main.cpp, which owns the gpio instance.
+void pumpPhysicalButtonsForProgram();
+
 #include <Arduino.h>
 #include <SDCardManager.h>
 
@@ -365,6 +368,10 @@ void byield() {
   if (++sinceYield >= YIELD_EVERY) {
     sinceYield = 0;
     vTaskDelay(1);
+    // The d-pad only reaches a running program through here: loop() is
+    // blocked inside the interpreter for the whole run. Same cadence as the
+    // scheduler yield, which is far faster than a finger.
+    pumpPhysicalButtonsForProgram();
   }
 
   if (!termDirty) return;

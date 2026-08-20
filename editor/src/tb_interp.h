@@ -50,6 +50,7 @@ extern token_t er;
 extern mem_t st;
 extern address_t here;
 extern mem_t form;
+extern address_t top;
 
 // Entry point, renamed from setup() by patches/tinybasic/02 so it doesn't
 // collide with the firmware's own.

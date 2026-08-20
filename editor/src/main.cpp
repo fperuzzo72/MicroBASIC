@@ -403,6 +403,40 @@ void enterDeepSleep(SleepReason reason) {
 
 // Translate physical button presses to HID key codes
 // NOTE: gpio.update() is called in loop() before this function
+// Called from the runtime's byield() while a BASIC program runs. loop() is
+// not running then -- the program *is* what loop() is doing -- so without
+// this the physical d-pad is dead for the whole run. That matters most at
+// boot, where an autoexec launcher is exactly the moment no keyboard is
+// paired yet, and it also means the games work without one.
+//
+// Deliberately NOT processPhysicalButtons(): that owns sleep, the power
+// button and UI state transitions, and firing those from inside the
+// interpreter would pull the ground out from under the running program.
+// This only enqueues navigation keys, which the program reads through GET
+// like any other key.
+void pumpPhysicalButtonsForProgram() {
+  static bool lu = false, ld = false, ll = false, lr = false, lc = false;
+  gpio.update();
+
+  const bool u = gpio.isPressed(HalGPIO::BTN_UP);
+  const bool d = gpio.isPressed(HalGPIO::BTN_DOWN);
+  const bool l = gpio.isPressed(HalGPIO::BTN_LEFT);
+  const bool r = gpio.isPressed(HalGPIO::BTN_RIGHT);
+  const bool c = gpio.isPressed(HalGPIO::BTN_CONFIRM);
+
+  auto fire = [](uint8_t k) {
+    enqueueKeyEvent(k, 0, true);
+    enqueueKeyEvent(k, 0, false);
+  };
+  if (u && !lu) fire(HID_KEY_UP);
+  if (d && !ld) fire(HID_KEY_DOWN);
+  if (l && !ll) fire(HID_KEY_LEFT);
+  if (r && !lr) fire(HID_KEY_RIGHT);
+  if (c && !lc) fire(HID_KEY_ENTER);
+
+  lu = u; ld = d; ll = l; lr = r; lc = c;
+}
+
 static void processPhysicalButtons() {
   static bool btnUpLast = false;
   static bool btnDownLast = false;
@@ -414,22 +448,18 @@ static void processPhysicalButtons() {
   // Use isPressed() — persistent debounced state.  With one-shot scanning
   // (radio quiet during navigation), InputManager debounce works reliably.
   //
-  // KNOWN ISSUE, pre-existing (not introduced by MicroBASIC): the shared-ADC
-  // resistor-ladder buttons occasionally register a phantom press with no
-  // physical touch -- confirmed by the user on the *original* MicroWriter/
-  // MicroSlate firmware too (the menu selection jumps to the next item on
-  // its own right after boot, no BLE involved at all). In SCREEN_EDITOR
-  // this is much more damaging than in a menu -- it silently corrupts
-  // whatever BASIC line is being typed instead of just an occasional wrong
-  // menu highlight. Tried and ruled out this session: raising
-  // InputManager's DEBOUNCE_DELAY (30ms didn't help, 120ms made it worse --
-  // see its own comment) and suppressing physical-button reads for a short
-  // window after BLE connect (the user confirmed it keeps happening well
-  // outside that window too, so BLE connection RF isn't the actual
-  // trigger, just possibly a correlated-but-not-causal coincidence, or one
-  // trigger among several). Left the [PHYSBTN] DBG_PRINTF below in place --
-  // it's what confirmed this live in the first place -- for whoever picks
-  // this up next. See docs/DEVELOPMENT_LOG.md.
+  // The phantom RIGHT that used to plague this -- a press with nobody
+  // touching the device, which in SCREEN_EDITOR silently corrupted whatever
+  // BASIC line was being typed -- is fixed in InputManager: it reports
+  // nothing until the raw ADC reading has once said "nothing pressed".
+  //
+  // Measured, not guessed. The first two conversions after boot return
+  // exactly 0 on the button channel, and 0 falls in RIGHT's band, which has
+  // no floor. Flooring the band was the obvious fix and would have been
+  // wrong: a real RIGHT press also reads 0, so the discriminator has to be
+  // *when*, not *what*. Two earlier mitigations (more debounce; suppressing
+  // reads after BLE connect) were tried and reverted. See
+  // docs/DEVELOPMENT_LOG.md for the full account.
   bool btnUp      = gpio.isPressed(HalGPIO::BTN_UP);
   bool btnDown    = gpio.isPressed(HalGPIO::BTN_DOWN);
   bool btnLeft    = gpio.isPressed(HalGPIO::BTN_LEFT);
@@ -598,18 +628,17 @@ static void processPhysicalButtons() {
         enqueueKeyEvent(k, 0, false);
       };
 
-      // Physical RIGHT disabled here: it's the button on the noisy end of
-      // the shared-ADC ladder (see the [PHYSBTN] investigation above) and
-      // firing on its own was making it impossible to type a program --
-      // silently moving the cursor mid-line with no visible cause. A BLE
-      // keyboard's own Right arrow still works fine (it goes through BLE
-      // HID parsing, not this analog read, so it isn't affected). Interim
-      // mitigation, not a fix for the underlying noise -- see
-      // docs/DEVELOPMENT_LOG.md.
+      // Physical RIGHT used to be left out of this list: it sits at the
+      // bottom of the shared-ADC ladder and was firing on its own, silently
+      // moving the cursor mid-line while a program was being typed. That was
+      // a mitigation, and the cause has since been found and fixed --
+      // InputManager now reports nothing until the raw reading has been seen
+      // at rest once, which is what the phantom was. Restored.
       uint8_t heldKey = 0;
       if      (btnUp)    heldKey = HID_KEY_UP;
       else if (btnDown)  heldKey = HID_KEY_DOWN;
       else if (btnLeft)  heldKey = HID_KEY_LEFT;
+      else if (btnRight) heldKey = HID_KEY_RIGHT;
 
       if (heldKey != repeatKey) {
         if (heldKey != 0) {

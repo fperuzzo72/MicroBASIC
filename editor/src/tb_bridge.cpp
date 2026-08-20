@@ -28,6 +28,20 @@ void tbSetup() {
   basicSetup();
   tbRuntimeSetQuiet(false);
   ready = true;
+
+  // basicSetup() sets st = SRUN when it found an autoexec.bas and loaded it.
+  // Upstream runs that at the top of basicLoop(), which this bridge replaces
+  // -- so without these four lines the file loads and then just sits there,
+  // which is what it did until someone noticed the boot screen complaining
+  // about its absence. Same three statements as upstream's, in the same
+  // order. (SERUN is the EEPROM path and cannot happen here: no EEPROM.)
+  if (st == SRUN) {
+    here = 0;
+    xrun();
+    st = SINT;
+    if (er != 0) reseterror();
+    screenDirty = true;
+  }
 }
 
 bool tbExecuteLine(const char* line) {

@@ -2690,3 +2690,55 @@ executado** no boot (`st = SRUN`). É exatamente o que as máquinas da época
 faziam, e transforma o aparelho em algo que liga já rodando um programa.
 Nada precisou ser escrito para isso funcionar — só parar de reclamar da
 ausência dele.
+
+## O RIGHT físico volta ao editor de tela
+
+Estava desativado ali como paliativo: era o botão que disparava sozinho e
+corrompia a linha de programa sendo digitada, sem causa visível. A causa foi
+encontrada e corrigida no `InputManager` (nada é reportado enquanto a leitura
+crua não disser "nada pressionado" ao menos uma vez), então o paliativo saiu.
+
+## autoexec: existia, mas não rodava
+
+Descoberto ao silenciar o diagnóstico que reclamava da ausência dele. O
+interpretador procura `autoexec.bas` no arranque, carrega e marca `st = SRUN`
+-- mas quem executa isso é o `basicLoop()`, e a nossa ponte substitui o
+`basicLoop()`. O arquivo carregava e ficava parado.
+
+Quatro linhas em `tbSetup()`, as mesmas três instruções do upstream na mesma
+ordem, e ele passa a rodar de verdade.
+
+### E o d-pad precisou alcançar um programa em execução
+
+Um lançador no boot é exatamente o momento em que nenhum teclado está pareado
+ainda -- e até agora os botões físicos não chegavam a um programa rodando. A
+fila de teclas é preenchida pelo BLE (que tem tarefa própria) e por
+`processPhysicalButtons()`, que roda no `loop()` -- e o `loop()` está parado
+dentro do interpretador durante todo o RUN.
+
+`byield()` agora chama um `pumpPhysicalButtonsForProgram()`, na mesma cadência
+do yield do escalonador (muito mais rápida que um dedo). Ele **não** é o
+`processPhysicalButtons()`: aquele governa sleep, botão de power e transições
+de estado da UI, e disparar isso de dentro do interpretador puxaria o chão do
+programa em execução. Este só enfileira teclas de navegação.
+
+Efeito colateral bem-vindo: o pacman e o sokoban passam a funcionar com o
+d-pad, sem teclado.
+
+### O lançador
+
+`examples/autoexec.bas`. Menu de seis entradas, setas e ENTER. A primeira é
+"SCREEN EDITOR" e apenas termina, caindo no prompt; as outras carregam um
+programa.
+
+Funciona porque `LOAD` **encadeia**: chamado de dentro de um programa em
+execução ele zera o programa atual, carrega o novo e o roda
+(`chain = 1; ... if (chain) st = SRUN;`). Não foi preciso inventar nada.
+
+O que ele **não** pode fazer é chamar o `VC`, pela mesma razão que não pode
+chamar `SCREEN`: os dois são comandos do firmware, interceptados antes do
+interpretador, e portanto só existem digitados no prompt. Um programa BASIC
+também não consegue listar o diretório -- o runtime tem `rootopen`/
+`rootnextfile`, mas nada disso está exposto à linguagem. Por isso a lista é
+fixa, em `DATA`. Para virar dinâmica seria preciso um statement novo no
+interpretador, ou seja, um patch.
