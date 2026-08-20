@@ -2966,3 +2966,75 @@ de energia.
 Mitigacao e nao correcao: a causa e o layout da memoria RTC diferir entre
 binarios, e disso nao ha como escapar de fora. O que da para fazer e nao
 entregar um numero que a heuristica do outro lado aceite.
+
+## Timestamp dos arquivos no SD: por que nao existe (achado, nao implementado)
+
+Levantado depois de fechar a data do vCodex, e **deliberadamente nao
+implementado** -- registrado aqui validado e pronto, para a decisao ser
+tomada quando fizer sentido, sem redescobrir nada.
+
+### O achado
+
+Este firmware **nao registra callback de data no SdFat**. E o SdFat so grava
+os campos de data da entrada de diretorio se houver um:
+
+    // FatFile.cpp
+    if (FsDateTime::callback) {
+      FsDateTime::callback(&date, &time, &ms10);
+      setLe16(dir->modifyDate, date);
+      setLe16(dir->accessDate, date);
+      setLe16(dir->modifyTime, time);
+    }
+
+Sem callback, `FsDateTime::callback` e `nullptr` e os campos ficam como
+estavam -- zero num arquivo novo, que a FAT le como `1980-00-00`. E por isso
+que os arquivos gravados aqui aparecem sem data ao abrir o cartao num PC.
+
+Nao e efeito colateral da mitigacao do relogio: o nosso relogio ja era
+invalido antes dela, porque chegando por troca de particao ele volta com lixo
+de qualquer forma. O zeramento acontece na *saida*, e nao afeta o que
+gravamos durante a sessao.
+
+### Como o leitor resolve
+
+`cpr-vcodex/src/util/SdFatDateTime.cpp` registra um callback e, quando o
+relogio nao e valido, cai para o **ano de compilacao** em vez de zero:
+
+    if (!TimeUtils::isClockValid(epoch)) {
+      *date = FS_DATE(compileYear(), 1, 1);
+      *time = FS_TIME(0, 0, 0);
+    }
+    ...
+    void TimeUtils::registerSdFatDateTimeCallback() {
+      FsDateTime::setCallback(sdFatDateTimeCallback);
+    }
+
+Tambem rejeita anos fora de 1980..2107, que e a faixa que a FAT representa.
+
+### As tres opcoes, com o que cada uma custa
+
+**1. Nao fazer nada.** Arquivos sem data. Ordenar por data no PC nao funciona;
+o resto funciona. E o estado atual.
+
+**2. Copiar o comportamento do leitor** -- callback com fallback para o ano de
+compilacao. Barato (uma funcao, uma chamada no `setup()`), e da arquivos com
+data plausivel e ordenavel. Mas como o relogio aqui **nunca** e sincronizado,
+na pratica *todos* os arquivos ficariam com a data de compilacao do firmware.
+Melhor que 1980, e ainda assim nao e a data real.
+
+**3. Ler a data do proprio aparelho.** O leitor guarda
+`lastKnownValidTimestamp` em `/.crosspoint/state.json`, no mesmo cartao (ver a
+secao anterior). Da para ler esse campo no arranque e usar como base do
+callback -- e dado do proprio dispositivo, nao invencao nossa, e seria a data
+real dentro de um dia. O custo e criar dependencia do formato de um arquivo
+que nao e nosso: se ele mudar o esquema, calamos ou erramos em silencio.
+Mitigavel validando a faixa antes de usar, e caindo na opcao 2 se falhar.
+
+### Se um dia for implementar
+
+- O callback e registrado uma vez, depois de `SdMan.begin()`.
+- A assinatura e `void cb(uint16_t* date, uint16_t* time, uint8_t* ms10)`, e
+  os macros `FS_DATE(y,m,d)` / `FS_TIME(h,m,s)` fazem o empacotamento.
+- Validar 1980..2107 antes de escrever; fora disso a FAT nao representa.
+- Vale conferir se o campo de criacao (`creationDate`) tambem interessa --
+  o trecho acima so cobre modificacao e acesso.
