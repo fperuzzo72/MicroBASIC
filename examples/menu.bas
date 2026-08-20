@@ -1,13 +1,15 @@
 1 REM ------------------------------------------
-2 REM FSP MICROBASIC - LANCADOR (autoexec.bas)
-3 REM Grave como autoexec.bas em /MicroBASIC/
-4 REM programs e o aparelho liga neste menu.
-5 REM O interpretador procura esse nome sozinho
-6 REM no arranque e o executa.
-7 REM
-8 REM Setas escolhem, ENTER confirma. Funciona
-9 REM com o teclado BLE e com o d-pad do X4.
-10 REM ------------------------------------------
+2 REM FSP MICROBASIC - LANCADOR (menu.bas)
+3 REM Rode com  LOAD "menu.bas"  e  RUN.
+4 REM
+5 REM Gravado com o nome autoexec.bas ele roda
+6 REM sozinho no arranque -- o interpretador
+7 REM procura esse nome. Segurar BACK no boot
+8 REM pula o autoexec, se algo der errado.
+9 REM
+10 REM Setas escolhem, ENTER confirma. Funciona
+11 REM com o teclado BLE e com o d-pad do X4.
+12 REM ------------------------------------------
 20 DIM N$(96):DIM F$(16)
 30 NP=6:SE=1
 40 FOR I=1 TO NP

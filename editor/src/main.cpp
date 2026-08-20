@@ -345,6 +345,25 @@ void setup() {
   // menu would, without touching the just-loaded currentOrientation.
   screenEditorReset();
   applyOrientationToRenderer(Orientation::LANDSCAPE_CCW);
+  // Segurar BACK no arranque pula o autoexec.bas. Sem essa saida, um autoexec
+  // com defeito exige cabo e esptool para recuperar -- que e exatamente o
+  // buraco em que este projeto caiu ao ganhar autoexec sem ganhar como sair
+  // dele. As maquinas da epoca tinham a mesma tecla de escape.
+  //
+  // Le o estado CRU e exige que ele persista: a primeira conversao do ADC
+  // depois do boot devolve 0, que classifica como RIGHT, e uma leitura
+  // espuria nao pode decidir isto sozinha.
+  {
+    int held = 0;
+    for (int i = 0; i < 12; i++) {
+      if (gpio.rawPressed(HalGPIO::BTN_BACK)) held++;
+      delay(25);
+    }
+    if (held >= 10) {
+      tbSetAutoexecEnabled(false);
+      screenEditorTermPrintLine("autoexec.bas pulado (BACK no arranque)");
+    }
+  }
   tbSetup();  // TinyBasic: direct-mode statements (see tb_bridge.h)
 
   bleSetup();
@@ -415,7 +434,7 @@ void enterDeepSleep(SleepReason reason) {
 // This only enqueues navigation keys, which the program reads through GET
 // like any other key.
 void pumpPhysicalButtonsForProgram() {
-  static bool lu = false, ld = false, ll = false, lr = false, lc = false;
+  static bool lu = false, ld = false, ll = false, lr = false, lc = false, lb = false;
   gpio.update();
 
   const bool u = gpio.isPressed(HalGPIO::BTN_UP);
@@ -423,6 +442,35 @@ void pumpPhysicalButtonsForProgram() {
   const bool l = gpio.isPressed(HalGPIO::BTN_LEFT);
   const bool r = gpio.isPressed(HalGPIO::BTN_RIGHT);
   const bool c = gpio.isPressed(HalGPIO::BTN_CONFIRM);
+  const bool b = gpio.isPressed(HalGPIO::BTN_BACK);
+
+  // The power button, and it is not optional. While a program runs, loop()
+  // is blocked inside the interpreter, so processPhysicalButtons() -- which
+  // normally owns this -- never runs. A program that loops forever waiting
+  // for a key (a game, a menu) therefore left the device with NO way to
+  // switch off: holding power did nothing, because nothing was reading it.
+  //
+  // Safe to call from in here precisely because enterDeepSleep() does not
+  // return. There is no half-torn-down interpreter to worry about.
+  // O power so passa a contar depois de ter sido visto solto uma vez. Ligar
+  // o aparelho e segurar o power -- e se um programa ja estiver rodando
+  // quando o loop chega aqui, o contador de 3s comecava a correr com o dedo
+  // ainda no botao. Ligar mandava dormir. Mesma logica da guarda do d-pad,
+  // que eu tinha escrito e nao apliquei aqui.
+  static bool powerSeenUp = false;
+  static bool powerHeldHere = false;
+  static unsigned long powerStartHere = 0;
+  const bool pw = gpio.isPressed(HalGPIO::BTN_POWER);
+  if (!powerSeenUp) {
+    if (!pw) powerSeenUp = true;
+  } else if (pw && !powerHeldHere) {
+    powerHeldHere = true;
+    powerStartHere = millis();
+  } else if (!pw) {
+    powerHeldHere = false;
+  } else if (millis() - powerStartHere > 3000) {
+    enterDeepSleep(SleepReason::POWER_LONGPRESS);
+  }
 
   auto fire = [](uint8_t k) {
     enqueueKeyEvent(k, 0, true);
@@ -433,8 +481,13 @@ void pumpPhysicalButtonsForProgram() {
   if (l && !ll) fire(HID_KEY_LEFT);
   if (r && !lr) fire(HID_KEY_RIGHT);
   if (c && !lc) fire(HID_KEY_ENTER);
+  // Physical Back breaks a running program, the same gesture Escape gives a
+  // BLE keyboard. Without it, the only way out of a program with no exit was
+  // a keyboard -- see inputConsumeBreakPending(), which looks for exactly
+  // this key.
+  if (b && !lb) fire(HID_KEY_ESCAPE);
 
-  lu = u; ld = d; ll = l; lr = r; lc = c;
+  lu = u; ld = d; ll = l; lr = r; lc = c; lb = b;
 }
 
 static void processPhysicalButtons() {

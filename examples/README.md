@@ -24,6 +24,7 @@ Ou use `VC`, que lista a pasta e carrega o escolhido.
 | `invaders.bas` | 2 (64 col) | tempo real | o mesmo, mais construção de string por posição |
 | `lander.bas` | qualquer | por turnos | `INPUT` numérico, aritmética de ponto flutuante |
 | `forca.bas` | qualquer | por turnos | `INPUT` de string, `READ`/`DATA`, `ASC`, substring |
+| `menu.bas` | qualquer | lançador | `LOAD` encadeado, `GET`, seleção com setas |
 | `sokoban.bas` | 1 ou maior | por turnos | duas camadas em strings, `GET` bloqueante, 4 fases em `DATA` |
 
 ## Veredito do hardware
@@ -60,6 +61,28 @@ trabalhando, e cada programa aqui foi desenhado em torno disso:
 - **Repinte só o que mudou.** Todos usam `LOCATE` para reescrever células
   individuais. Redesenhar a tela inteira a cada quadro custaria vários
   refreshes.
+
+## O lançador, e o autoexec
+
+`menu.bas` é um menu: setas escolhem, ENTER carrega e roda. A primeira opção
+apenas termina, caindo no prompt do BASIC.
+
+Ele funciona porque **`LOAD` encadeia**: chamado de dentro de um programa em
+execução, zera o programa atual, carrega o novo e o roda. Nada precisou ser
+inventado para isso.
+
+Gravado no cartão com o nome **`autoexec.bas`**, o interpretador o encontra
+sozinho no arranque e o executa — o aparelho liga direto no menu. Se algo
+der errado com o programa de arranque, **segurar BACK no boot pula o
+autoexec**. Essa saída existe porque a falta dela custou uma recuperação por
+cabo e esptool: um lançador roda para sempre, e enquanto um programa roda o
+`loop()` do firmware está parado.
+
+A lista de programas é fixa, em `DATA`. Um programa BASIC não consegue listar
+o diretório: o runtime tem `rootopen`/`rootnextfile`, mas nada disso está
+exposto à linguagem. Pelo mesmo motivo o lançador não pode chamar o `VC` nem
+o `SCREEN` — os dois são comandos do firmware, interceptados antes do
+interpretador, e só existem digitados no prompt.
 
 ## Detecção de resolução
 

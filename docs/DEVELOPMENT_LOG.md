@@ -2742,3 +2742,43 @@ também não consegue listar o diretório -- o runtime tem `rootopen`/
 `rootnextfile`, mas nada disso está exposto à linguagem. Por isso a lista é
 fixa, em `DATA`. Para virar dinâmica seria preciso um statement novo no
 interpretador, ou seja, um patch.
+
+## A armadilha do autoexec, e as duas saídas que faltavam
+
+Custou uma recuperação por cabo e esptool, e o erro foi inteiramente de
+projeto meu.
+
+Eu fiz o `autoexec.bas` rodar dentro do `setup()`. Um lançador é um programa
+que roda **para sempre** — então, com um autoexec no cartão, o `loop()` nunca
+começava. E é o `loop()` que lê o botão de power. Resultado: aparelho ligado,
+sem menu, sem power, sem sleep, sem saída a não ser o reset — e no reset a
+mesma coisa de novo.
+
+Pior: eu já sabia da metade disso. Ao fazer o d-pad alcançar um programa em
+execução, eu vi que o `loop()` fica parado durante o RUN e **tratei só a
+navegação**, deixando o power de fora. O usuário topou com isso jogando
+sokoban ("não lê o botão de power enquanto roda o basic") antes de eu ligar
+os pontos.
+
+Três correções, e todas são a mesma ideia aplicada onde faltava:
+
+- **O power alcança um programa em execução.** Segurar 3s dorme, de dentro do
+  interpretador. Seguro porque `enterDeepSleep()` não retorna.
+- **O power só conta depois de ter sido visto solto uma vez.** Ligar o
+  aparelho é segurar o power; sem isso o contador de 3s começava a correr com
+  o dedo ainda no botão, e ligar mandava dormir. É literalmente a guarda que
+  eu já tinha escrito para o d-pad e não apliquei aqui.
+- **Segurar BACK no arranque pula o autoexec.** Lê o estado *cru* e exige que
+  persista por ~300ms, porque a primeira conversão do ADC devolve 0 e uma
+  leitura espúria não pode decidir isso sozinha.
+
+E o Back físico agora interrompe qualquer programa (manda ESCAPE), fechando
+um item que estava no log como limitação conhecida desde a integração.
+
+A lição, e ela é sobre ordem e não sobre código: **eu pus uma ação
+irreversível dentro de um caminho que roda no boot, e mandei testar um
+autoexec antes de existir como sair dele.** A saída devia ter vindo primeiro.
+
+Por decisão do usuário o aparelho fica **sem** autoexec; o lançador virou
+`examples/menu.bas`, rodado à mão. O suporte no firmware fica, agora com as
+saídas.

@@ -38,3 +38,7 @@ bool tbIsRunning();
 // an autoexec.bas at startup with `if (ifileopen(...))`, so a failure there
 // is the normal case, not a fault worth announcing on the boot screen.
 void tbRuntimeSetQuiet(bool quiet);
+
+// Desliga a execucao do autoexec.bas neste boot. Chamado antes de tbSetup()
+// quando o usuario segura BACK no arranque.
+void tbSetAutoexecEnabled(bool enabled);

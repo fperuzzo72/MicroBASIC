@@ -11,6 +11,9 @@ extern bool screenDirty;
 #include "tb_interp.h"
 
 static bool ready = false;
+static bool autoexecEnabled = true;
+
+void tbSetAutoexecEnabled(bool enabled) { autoexecEnabled = enabled; }
 static bool running = false;
 
 bool tbIsRunning() { return running; }
@@ -36,10 +39,14 @@ void tbSetup() {
   // about its absence. Same three statements as upstream's, in the same
   // order. (SERUN is the EEPROM path and cannot happen here: no EEPROM.)
   if (st == SRUN) {
-    here = 0;
-    xrun();
+    if (autoexecEnabled) {
+      here = 0;
+      xrun();
+      if (er != 0) reseterror();
+    } else {
+      top = 0;  // descarta o programa carregado
+    }
     st = SINT;
-    if (er != 0) reseterror();
     screenDirty = true;
   }
 }

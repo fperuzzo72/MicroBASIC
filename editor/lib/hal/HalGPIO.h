@@ -32,6 +32,12 @@ class HalGPIO {
   // Button input methods
   void update();
   bool isPressed(uint8_t buttonIndex) const;
+
+  // Leitura crua, sem debounce e sem a guarda de arranque do InputManager.
+  // Existe para uma unica pergunta que precisa ser feita *antes* de a guarda
+  // liberar: "o usuario esta segurando este botao agora, no boot?" -- ver o
+  // pulo do autoexec em main.cpp.
+  bool rawPressed(uint8_t buttonIndex) { return inputMgr.getState() & (1u << buttonIndex); }
   bool wasPressed(uint8_t buttonIndex) const;
   bool wasAnyPressed() const;
   bool wasReleased(uint8_t buttonIndex) const;
