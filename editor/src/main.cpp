@@ -359,10 +359,7 @@ void setup() {
       if (gpio.rawPressed(HalGPIO::BTN_BACK)) held++;
       delay(25);
     }
-    if (held >= 10) {
-      tbSetAutoexecEnabled(false);
-      screenEditorTermPrintLine("autoexec.bas pulado (BACK no arranque)");
-    }
+    if (held >= 10) tbSetAutoexecEnabled(false);
   }
   tbSetup();  // TinyBasic: direct-mode statements (see tb_bridge.h)
 

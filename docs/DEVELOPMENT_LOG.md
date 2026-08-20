@@ -2782,3 +2782,25 @@ autoexec antes de existir como sair dele.** A saída devia ter vindo primeiro.
 Por decisão do usuário o aparelho fica **sem** autoexec; o lançador virou
 `examples/menu.bas`, rodado à mão. O suporte no firmware fica, agora com as
 saídas.
+
+### Detalhes do arranque, validados no aparelho
+
+- A ordem das linhas de boot inverteu: a identificação da máquina primeiro,
+  o aviso de arranque abaixo dela. A mensagem passou a inglês, como o resto
+  da interface: `Skipping autoexec.bas (BACK held)`. (O usuário sugeriu
+  "Jumping", que em inglês seria pular por cima de algo físico; "skipping" é
+  a palavra para omitir uma etapa.)
+
+- **Segurar BACK só funciona se o botão já estiver segurado antes de ligar.**
+  Tentar apertá-lo durante a limpeza de tela é tarde demais -- a amostragem
+  acontece cedo no `setup()`, antes do primeiro desenho. Validado no
+  aparelho e deixado assim: exigir o botão *antes* do power é o
+  comportamento mais previsível, e é como as máquinas da época faziam.
+
+- **Pulando o autoexec, o banner do interpretador continua não aparecendo.**
+  Consequência direta de `autorun()`: ele retorna 1 assim que *encontra* o
+  arquivo, e quem chama pula o `displaybanner()` -- a nossa decisão de não
+  executar vem depois disso. Poderia ser contornado, e o usuário validou
+  como está. Registrado porque a ausência do banner foi o sinal que
+  identificou o autoexec como causa de toda a confusão da tarde; vale saber
+  que ele significa "existe um autoexec no cartão", e não "algo falhou".
