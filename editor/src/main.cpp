@@ -18,6 +18,8 @@
 #include "file_manager.h"
 #include "ui_renderer.h"
 #include "wifi_sync.h"
+
+#include <sys/time.h>  // settimeofday(), na entrega para outra particao
 #include "screen_editor.h"
 #include "tb_bridge.h"
 
@@ -220,6 +222,38 @@ void switchToOtaApp(int index) {
     return;
   }
   confirmLastOtaSwitch();
+
+  // Zera o relogio de sistema antes de entregar o controle.
+  //
+  // Sem DS3231 (o X4 nao tem: HalClock::begin() desiste se nao for um X3), o
+  // CPR-vCodex guarda o dia em /.crosspoint/state.json no cartao, no campo
+  // lastKnownValidTimestamp, e o atualiza assim:
+  //
+  //     lastKnownValidTimestamp =
+  //         std::max(lastKnownValidTimestamp, getCurrentValidTimestamp());
+  //
+  // e considera valido qualquer relogio ACIMA de 2024-01-01 -- so rejeita
+  // valores pequenos demais, nunca grandes demais.
+  //
+  // Numa troca de particao, o relogio de sistema volta com lixo: a referencia
+  // do ESP-IDF (s_boot_time) fica na memoria RTC, cujo layout o linker define
+  // por binario, e nos declaramos zero variaveis ali enquanto o leitor declara
+  // onze. O lixo observado foi 4154457600 -- 26/08/2101. Sendo maior que 2024,
+  // passa na validacao, o max o adota, e ele fica **gravado no cartao**. Como
+  // e max, nunca mais desce sozinho: so o "Set date" manual conserta, porque
+  // aquele caminho atribui em vez de comparar.
+  //
+  // Zerando aqui, getCurrentValidTimestamp() devolve 0, o max fica com o valor
+  // que ja estava no arquivo, e a data guardada e **preservada**. Nao se perde
+  // sincronia -- apenas este boot nao conta como sincronizado, que ja e o
+  // normal num X4 depois de qualquer evento de energia.
+  //
+  // Isto e mitigacao, nao correcao: a causa esta no layout da memoria RTC
+  // diferir entre dois binarios, e disso nao temos como escapar. O que da para
+  // fazer e nao entregar um numero que a heuristica do outro lado aceite.
+  struct timeval tv = {};
+  settimeofday(&tv, nullptr);
+
   esp_restart();
 }
 

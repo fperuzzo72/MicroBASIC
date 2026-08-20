@@ -2897,3 +2897,72 @@ nao funcionou. Nao eram dois defeitos.
 
 Aproveitado para incluir o item no backup em `/MicroBASIC/ui_prefs.json`,
 como os outros ajustes, para sobreviver a uma regravacao de firmware.
+
+## A data no vCodex: mecanismo completo
+
+Fechado, e o resultado corrige duas analises minhas anteriores. Vale por
+inteiro porque o caminho ate aqui foi todo por eliminacao medida, e porque a
+pergunta certa foi do usuario, nao minha.
+
+### O que foi eliminado, com evidencia
+
+**Colisao de NVS.** Dump da particao (0x9000, 20KB) antes e depois do
+percurso MicroBASIC -> vCodex: **byte a byte identica**. Nada que este
+firmware escreve toca o estado do leitor.
+
+**Identificacao errada de hardware.** `cphw/dev_det = 1`, e no enum dele
+`Unknown=0, X4=1, X3=2`. Ele sabe que e um X4 e tem isso cacheado. A
+hipotese de ele se achar um X3 e ler um DS3231 inexistente morre aqui.
+
+**Nosso uso do GPIO 0.** No X4 o proprio leitor le a bateria do mesmo pino
+por ADC (`pinMode(BAT_GPIO0, INPUT)`); o barramento I2C e do X3. Cheguei a
+trocar nossa leitura para I2C e gravar essa versao antes de verificar --
+revertida depois que o usuario mandou conferir como o leitor faz.
+
+### O mecanismo
+
+Sem DS3231 (`HalClock::begin()` desiste na primeira linha se nao for X3), o
+dia vive em `/.crosspoint/state.json` **no cartao SD**, campo
+`lastKnownValidTimestamp`. E atualizado assim:
+
+    lastKnownValidTimestamp =
+        std::max(lastKnownValidTimestamp, getCurrentValidTimestamp());
+
+e a validacao e apenas um piso:
+
+    VALID_CLOCK_THRESHOLD = 1704067200   // 2024-01-01
+    isClockValid(e) { return e >= VALID_CLOCK_THRESHOLD; }
+
+So rejeita relogio pequeno demais. Nunca grande demais. Entao:
+
+1. Na troca de particao o relogio de sistema volta com lixo. A referencia do
+   ESP-IDF (`s_boot_time`) fica na memoria RTC, cujo layout o linker define
+   **por binario** -- nos declaramos zero variaveis ali, o leitor declara
+   onze (logs, panico, estagio de boot). Duas plantas diferentes do mesmo
+   terreno.
+2. O lixo observado foi 4154457600 = **26/08/2101**. Maior que 2024, passa.
+3. O `max` o adota e **grava no cartao**.
+4. Sendo `max`, nunca mais desce. So o "Set date" manual conserta, porque
+   aquele caminho atribui (`registerValidTimeSync`) em vez de comparar.
+
+Isso explica tudo o que o usuario havia observado e que eu nao sabia
+encaixar: a data atravessar dias desligado (esta num arquivo, nao em memoria
+volatil), nao se curar sozinha (o `max` e catraca), e morrer so na troca de
+particao (mesmo binario, mesmo layout).
+
+### A mitigacao, e por que ela nao custa nada
+
+`switchToOtaApp()` zera o relogio de sistema antes do `esp_restart()`. Assim
+`getCurrentValidTimestamp()` devolve 0, o `max` fica com o valor **do
+arquivo**, e a data guardada e preservada.
+
+Eu tinha proposto isso antes descrevendo o custo como "perde a sincronia
+para nao ganhar data errada", e o usuario recusou -- com razao, dado o que eu
+havia dito. Estava errado sobre o custo: **nao ha custo.** Sem o `max`
+engolir lixo, o arquivo mantem o que ja tinha; o unico efeito e este boot nao
+contar como sincronizado, que ja e o normal num X4 depois de qualquer evento
+de energia.
+
+Mitigacao e nao correcao: a causa e o layout da memoria RTC diferir entre
+binarios, e disso nao ha como escapar de fora. O que da para fazer e nao
+entregar um numero que a heuristica do outro lado aceite.
