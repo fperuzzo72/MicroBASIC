@@ -433,6 +433,17 @@ void enterDeepSleep(SleepReason reason) {
 // interpreter would pull the ground out from under the running program.
 // This only enqueues navigation keys, which the program reads through GET
 // like any other key.
+// Depois que um programa BASIC termina, os botoes tem de ser vistos soltos
+// antes de gerarem borda de novo. Sem isso, um unico toque fisico dispara
+// DUAS vezes: uma no pump abaixo (que roda enquanto o programa executa) e
+// outra em processPhysicalButtons(), cujo estado de borda ficou congelado em
+// "solto" durante todo o RUN. Foi assim que o ENTER que escolhia uma opcao
+// do lancador reaparecia no editor de tela, executando a linha que o
+// programa tinha acabado de imprimir -- "Syntax Error" logo abaixo dela.
+static bool physRearmPending = false;
+
+void physicalButtonsRearm() { physRearmPending = true; }
+
 void pumpPhysicalButtonsForProgram() {
   static bool lu = false, ld = false, ll = false, lr = false, lc = false, lb = false;
   gpio.update();
@@ -519,6 +530,15 @@ static void processPhysicalButtons() {
   bool btnRight   = gpio.isPressed(HalGPIO::BTN_RIGHT);
   bool btnConfirm = gpio.isPressed(HalGPIO::BTN_CONFIRM);
   bool btnBack    = gpio.isPressed(HalGPIO::BTN_BACK);
+
+  // Rearme apos um programa BASIC -- ver physicalButtonsRearm() acima.
+  if (physRearmPending) {
+    if (btnUp || btnDown || btnLeft || btnRight || btnConfirm || btnBack) {
+      btnUp = btnDown = btnLeft = btnRight = btnConfirm = btnBack = false;
+    } else {
+      physRearmPending = false;
+    }
+  }
 
   // Power button state machine for proper long/short press handling
   static bool powerHeld = false;
@@ -980,6 +1000,19 @@ void loop() {
   // Don't start a new screen update while display is still refreshing
   if (screenDirty && !renderer.isRefreshing()) {
     updateScreen();
+  }
+
+  // O autoexec so roda depois que o loop deu uma volta inteira e a tela foi
+  // desenhada uma vez. Rodando no setup(), como fazia antes, o loop() nunca
+  // comecava: sem power, sem desenho, sem saida. Aqui, se o programa nunca
+  // terminar, pelo menos a interface ja existiu e o power ja passou pelo
+  // pump de botoes.
+  {
+    static bool autoexecTried = false;
+    if (!autoexecTried) {
+      autoexecTried = true;
+      tbRunPendingAutoexec();
+    }
   }
 
   // Persist UI settings to NVS when they change (NVS write only on change, not every loop)

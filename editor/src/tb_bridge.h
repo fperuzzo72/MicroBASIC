@@ -42,3 +42,10 @@ void tbRuntimeSetQuiet(bool quiet);
 // Desliga a execucao do autoexec.bas neste boot. Chamado antes de tbSetup()
 // quando o usuario segura BACK no arranque.
 void tbSetAutoexecEnabled(bool enabled);
+
+// Executa o autoexec.bas que basicSetup() carregou, se houver. Chamado do
+// loop(), NAO do setup(): um lancador roda para sempre, e rodando dentro do
+// setup() o loop() nunca comeca -- que e quem le o botao de power, desenha a
+// tela e mantem a interface viva. Ver docs/DEVELOPMENT_LOG.md.
+// Retorna true se havia algo para rodar.
+bool tbRunPendingAutoexec();

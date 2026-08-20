@@ -35,10 +35,7 @@
 230 LOCATE 1,13:PRINT "Carregando ";F$;"...";
 240 LOAD F$
 250 END
-300 LOCATE 1,13:PRINT "Pronto. Digite comandos BASIC."
-305 REM PRINT sem ";" acima: o cursor precisa descer para
-306 REM a linha seguinte, senao o prompt do BASIC comeca
-307 REM colado no fim da frase.
+300 LOCATE 1,13:PRINT "Pronto. Digite comandos BASIC.";
 310 END
 500 REM ---- desenha o menu ----
 510 FOR I=1 TO NP

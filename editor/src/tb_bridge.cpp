@@ -4,6 +4,11 @@
 #include "screen_editor.h"
 #include "input_handler.h"
 
+// Definidos em main.cpp. Chamados sempre que o interpretador devolve o
+// controle: o toque que encerrou o programa nao pode virar uma segunda borda
+// na interface, nem sobrar na fila de teclas.
+void physicalButtonsRearm();
+
 extern bool screenDirty;
 
 #include <cstring>
@@ -38,17 +43,24 @@ void tbSetup() {
   // which is what it did until someone noticed the boot screen complaining
   // about its absence. Same three statements as upstream's, in the same
   // order. (SERUN is the EEPROM path and cannot happen here: no EEPROM.)
-  if (st == SRUN) {
-    if (autoexecEnabled) {
-      here = 0;
-      xrun();
-      if (er != 0) reseterror();
-    } else {
-      top = 0;  // descarta o programa carregado
-    }
-    st = SINT;
-    screenDirty = true;
-  }
+  // NAO executa aqui. basicSetup() deixa st = SRUN quando achou um
+  // autoexec.bas; roda-lo neste ponto significa que o loop() nunca comeca,
+  // e o loop() e quem le o power, desenha e mantem a interface viva. Um
+  // lancador roda para sempre, entao isso deixava o aparelho aceso, mudo e
+  // sem como desligar. Quem chama e o loop(), depois do primeiro desenho.
+}
+
+bool tbRunPendingAutoexec() {
+  if (st != SRUN) return false;
+  if (!autoexecEnabled) { top = 0; st = SINT; return false; }
+  here = 0;
+  xrun();
+  st = SINT;
+  if (er != 0) reseterror();
+  physicalButtonsRearm();
+  inputDiscardPendingKeys();
+  screenDirty = true;
+  return true;
 }
 
 bool tbExecuteLine(const char* line) {
@@ -93,6 +105,9 @@ bool tbExecuteLine(const char* line) {
   }
 
   running = false;
+  physicalButtonsRearm();
+  inputDiscardPendingKeys();
+
   screenDirty = true;
   const bool failed = (er != 0);
   if (failed) {
