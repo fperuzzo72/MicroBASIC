@@ -123,12 +123,20 @@ static constexpr int SCREEN_EDITOR_MAX_ROWS = 24;
 // here truncates before it does.
 static constexpr int MAX_PROGRAM_LINE_LEN = 160;
 
-// Ceiling on a whole program as *text*. Nothing in this firmware holds a
-// program in that form any more -- the interpreter stores its own tokenised
-// copy and SAVE/LOAD stream straight to the SD card -- so this survives only
-// as the size limit on a program uploaded through the web server, which does
-// have to fit somewhere before it lands on disk.
-static constexpr size_t PROGRAM_TEXT_BUFFER_SIZE = 4096;
+// Biggest .bas the web uploader accepts.
+//
+// This used to be 4096, inherited from a whole-program *text buffer* that no
+// longer exists -- nothing in this firmware holds a program in RAM as text
+// any more, and the upload streams straight to the SD card a chunk at a time.
+// So the old number guarded nothing and simply rejected files: the twelve-
+// level sokoban is 5.7KB and bounced with "File too large".
+//
+// The real ceiling on a program is the interpreter's own memory, where it
+// lives tokenised -- MEMSIZE, 16KB (patches/tinybasic/03). Tokenised is
+// smaller than source, so a file up to that size is a safe bound: anything
+// this lets through and the interpreter still cannot hold will fail loudly at
+// LOAD rather than silently here.
+static constexpr size_t PROGRAM_UPLOAD_MAX_SIZE = 16384;
 
 // --- Font Size ---
 enum class FontSize : uint8_t { SMALL = 0, MEDIUM = 1, LARGE = 2 };

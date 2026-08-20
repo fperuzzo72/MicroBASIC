@@ -566,7 +566,7 @@ static const Collection COLLECTIONS[] = {
     // Programs are listed unfiltered and uploaded as-is: SAVE stores under
     // exactly the name typed with no forced extension (see screen_editor.h),
     // so filtering here would hide the files the user just saved.
-    {"programs", "/MicroBASIC/programs", "", "", PROGRAM_TEXT_BUFFER_SIZE - 1},
+    {"programs", "/MicroBASIC/programs", "", "", PROGRAM_UPLOAD_MAX_SIZE - 1},
 };
 static constexpr int COLLECTION_COUNT = sizeof(COLLECTIONS) / sizeof(COLLECTIONS[0]);
 
@@ -767,8 +767,8 @@ static void handleNoteUploadData() {
     if (!noteUpload.ok) return;
     // Reject before it becomes another instance of the TEXT_BUFFER_SIZE
     // silent-truncation trap (see config.h) — a note that can't fully load
-    // into the editor shouldn't be accepted in the first place. Programs get
-    // the same treatment against their own (smaller) load buffer.
+    // into the editor shouldn't be accepted in the first place. Programs are
+    // bounded by the interpreter's memory instead, not by any buffer here.
     if (noteUpload.bytesWritten + upload.currentSize >
         (uploadColl ? uploadColl->maxFileSize : TEXT_BUFFER_SIZE - 1)) {
       noteUpload.ok = false;
