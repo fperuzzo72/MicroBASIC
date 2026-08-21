@@ -3131,3 +3131,27 @@ divergiu); ou um ajuste de fuso proprio nos Settings do MicroBASIC,
 independente mas mais uma coisa para manter. Assumir UTC-3 fixo nao vale: e a
 constante que funciona hoje e mente quando muda o horario de verao ou o
 aparelho troca de pais.
+
+## Veredito do hardware: as 12 fases e o Rotated
+
+**As 12 fases do sokoban foram jogadas e concluidas no aparelho.** A rampa de
+dificuldade, montada pela contagem de movimentos da solucao otima (10 a 32),
+se sustentou na pratica -- nenhuma fase precisou ser reordenada. Vale como
+confirmacao de que a aproximacao serve: contagem de movimentos nao mede
+dificuldade percebida, mas para desenhar uma progressao ela bastou.
+
+**O `Game Buttons` funciona ao longo de partidas inteiras**, nao so nas duas
+telas em que foi testado a principio, e a interface normal segue com o
+mapeamento de sempre.
+
+E o veredito do usuario sobre ele vale mais que "funciona", porque delimita o
+que faz sentido escrever daqui em diante:
+
+> Para jogos de turnos ou aplicativos simples que precisam de pouca
+> interacao a interface e funcional o suficiente, temos as 4 direcoes e ENTER.
+
+Ou seja: **quatro direcoes e um confirmar**, sem teclado. E o orcamento de
+entrada real do aparelho quando ele esta na rua, e ele combina exatamente com
+o genero que o painel ja pedia -- turnos, quebra-cabecas, menus. Um programa
+que precise de mais teclas que isso so funciona em casa, com o teclado BLE
+pareado, e vale saber disso antes de escrever e nao depois.
