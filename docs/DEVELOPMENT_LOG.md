@@ -3215,10 +3215,23 @@ engano do codigo que gerou o arquivo, entao os dois erros se cancelaram e o
 defeito ficou invisivel. A licao e concreta: **ao verificar um formato,
 decodifique com o consumidor real, nao com o produtor.**
 
-### O que fica em aberto (opcional)
+### E o traco grosso e uma vantagem, nao um defeito
 
-A ampliacao fracionaria continua existindo: em 10x20, unscii sai com tracos de
-3px, contra 1px do Terminus nativo. Agora que o empacotamento esta certo, da
-para julgar isso no painel de verdade -- pode ser que 3px leia melhor em
-e-ink, onde traco de 1px as vezes fica palido. Se nao ler, os arquivos para a
-troca ja estao no repositorio.
+Confirmado no painel: SCREEN 2 e 3 legiveis, e o **peso** das letras foi
+elogiado -- "as outras fontes ficavam muito clarinhas e dificeis de ler,
+estas ficaram otimas, mesmo pequenas na tela".
+
+Isso encerra a questao pelo lado oposto ao que eu esperava. Eu ia propor a
+troca por Terminus nativo (10x20 e 12x24, sem ampliacao, traco de 1px)
+justamente porque os 3px do unscii ampliado me pareceram pesados demais na
+analise. No e-ink, em corpo pequeno, e o contrario: traco de 1px fica palido
+e o peso extra e o que torna a letra legivel.
+
+Ou seja, a calibragem do resample por area -- o limiar de 25% de cobertura
+com o `cap_stem_width` -- estava certa desde o inicio. So o empacotamento
+estava errado, e ele fazia o resultado parecer culpa da ampliacao.
+
+**Nao trocar por Terminus.** Os arquivos continuam em `research/fonts/src/`
+como alternativa registrada, mas a decisao esta tomada e tem evidencia de
+hardware: unscii ampliado com traco reforcado le melhor neste painel do que
+uma fonte de traco fino desenhada para o tamanho.
