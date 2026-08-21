@@ -27,14 +27,49 @@ static bool lineBreaksDirty = true;  // Only recompute line breaks when buffer/m
 
 // --- Selection & clipboard ---
 static int selectionAnchor = -1;      // -1 = no selection; else the fixed end, cursorPosition is the live end
-// Allocated on the first copy rather than reserved statically. It is the
-// same 16KB as the text buffer, it is only ever touched by copy/cut/paste,
-// and static .bss sits below the heap -- so as a static array it was 16KB
-// permanently removed from the largest contiguous block, on a device where
-// BLE needs 20KB in one piece to reconnect and the WiFi stack needs its own.
-// A copy that cannot allocate simply does not copy, which is a far better
-// failure than a keyboard that will not reconnect.
+// Allocated on the first copy rather than reserved statically. 16KB of .bss
+// sits below the heap, so as a static array it was 16KB permanently removed
+// from the largest contiguous block -- on a device where the BLE connect task
+// needs 20KB in one piece and has already failed to get it (see
+// docs/DEVELOPMENT_LOG.md). A copy that cannot allocate simply does not copy,
+// which is a far better failure than a keyboard that will not reconnect.
 static char* clipboard = nullptr;
+
+// --- Registro de desfazer (ver editorUndo em text_editor.h) ---------------
+//
+// Uma operacao em bloco e descrita por: na posicao `pos`, foram inseridos
+// `undoInserted` bytes e removidos os `undoRemovedLen` bytes guardados em
+// `undoRemoved`. Desfazer e o inverso, na ordem inversa: tira o que entrou,
+// devolve o que saiu.
+//
+// Isso cobre os tres casos com uma estrutura so: apagar (inserted=0), colar
+// (removed vazio) e colar por cima de uma selecao (os dois), que sem isto
+// desfaria so metade da operacao.
+//
+// Alocado sob demanda como o clipboard, e pelo mesmo motivo: 16KB estaticos
+// sairiam do maior bloco contiguo, que a task de conexao BLE precisa inteiro.
+static char* undoRemoved = nullptr;
+static size_t undoRemovedLen = 0;
+static size_t undoInserted = 0;
+static int undoPos = -1;
+
+static void undoClear() { undoPos = -1; undoRemovedLen = 0; undoInserted = 0; }
+
+// Chamada ANTES da operacao alterar o buffer.
+static void undoRecord(int pos, const char* removed, size_t removedLen, size_t inserted) {
+  undoClear();
+  if (removedLen > 0) {
+    if (!undoRemoved) {
+      undoRemoved = (char*)malloc(TEXT_BUFFER_SIZE);
+      if (!undoRemoved) return;  // sem memoria: fica sem desfazer, nao falha
+    }
+    if (removedLen > TEXT_BUFFER_SIZE) return;
+    memcpy(undoRemoved, removed, removedLen);
+    undoRemovedLen = removedLen;
+  }
+  undoInserted = inserted;
+  undoPos = pos;
+}
 static size_t clipboardLen = 0;
 
 // Forward declaration
@@ -204,6 +239,7 @@ int editorGetWordCount() {
 }
 
 void editorInsertChar(char c) {
+  undoClear();  // edicao fora de bloco: ver editorUndo em text_editor.h
   if (textLength >= TEXT_BUFFER_SIZE - 1) return;
 
   // Shift text right
@@ -261,6 +297,7 @@ static int utf8FwdLen(int pos) {
 }
 
 void editorDeleteChar() {
+  undoClear();  // edicao fora de bloco: ver editorUndo em text_editor.h
   if (cursorPosition <= 0 || textLength == 0) return;
 
   int len = utf8BackLen(cursorPosition);  // bytes to remove (1–4)
@@ -280,6 +317,7 @@ void editorDeleteChar() {
 }
 
 void editorDeleteForward() {
+  undoClear();  // edicao fora de bloco: ver editorUndo em text_editor.h
   if (cursorPosition >= (int)textLength) return;
 
   int len = utf8FwdLen(cursorPosition);  // bytes to remove (1–4)
@@ -399,6 +437,7 @@ void editorDeleteSelection() {
   int start = editorGetSelectionStart();
   int end = editorGetSelectionEnd();
   int len = end - start;
+  undoRecord(start, textBuffer + start, (size_t)len, 0);
   memmove(textBuffer + start, textBuffer + end, textLength - end);
   textLength -= len;
   textBuffer[textLength] = '\0';
@@ -425,19 +464,88 @@ void editorCopySelection() {
 
 void editorCutSelection() {
   editorCopySelection();
-  editorDeleteSelection();
+  editorDeleteSelection();  // e quem grava o registro de desfazer
 }
 
 bool editorHasClipboardContent() { return clipboardLen > 0; }
 
+bool editorCanUndo() { return undoPos >= 0; }
+
+void editorUndo() {
+  if (undoPos < 0) return;
+  const int pos = undoPos;
+  const size_t ins = undoInserted;
+  const size_t rem = undoRemovedLen;
+
+  // Ordem inversa da operacao: tira o que entrou, devolve o que saiu.
+  if (ins > 0 && pos + (int)ins <= textLength) {
+    memmove(textBuffer + pos, textBuffer + pos + ins, textLength - pos - ins);
+    textLength -= ins;
+  }
+  if (rem > 0 && undoRemoved && textLength + rem < TEXT_BUFFER_SIZE) {
+    memmove(textBuffer + pos + rem, textBuffer + pos, textLength - pos);
+    memcpy(textBuffer + pos, undoRemoved, rem);
+    textLength += rem;
+  }
+  textBuffer[textLength] = '\0';
+  cursorPosition = pos + (int)rem;
+  if (cursorPosition > textLength) cursorPosition = textLength;
+  selectionAnchor = -1;
+
+  // Um nivel so: desfazer consome o registro. Sem redo, e sem a armadilha de
+  // um Ctrl+Z repetido refazer a operacao por engano.
+  undoClear();
+
+  unsavedChanges = true;
+  lineBreaksDirty = true;
+  editorRecalculateLines();
+  ensureCursorVisible(storedVisibleLines);
+}
+
 // One shift + one line-break recompute, unlike editorInsertUtf8 (byte-at-a-
 // time, fine for the 1-4 bytes a dead key composes, but would be
 // O(pastedBytes * textLength) for a multi-line paste).
+// Cola substituindo a selecao, se houver, como UMA operacao. O chamador nao
+// deve apagar a selecao antes: dois registros separados fariam o Ctrl+Z
+// desfazer so a colagem, deixando o trecho apagado perdido.
+void editorPasteOverSelection() {
+  if (clipboardLen == 0 || !clipboard) return;
+  if (!editorHasSelection()) { editorPasteAtCursor(); return; }
+
+  const int start = editorGetSelectionStart();
+  const int end = editorGetSelectionEnd();
+  const size_t removedLen = (size_t)(end - start);
+
+  size_t len = clipboardLen;
+  if (textLength - removedLen + len >= TEXT_BUFFER_SIZE) {
+    len = TEXT_BUFFER_SIZE - 1 - (textLength - removedLen);
+  }
+  undoRecord(start, textBuffer + start, removedLen, len);
+
+  // remove a selecao sem gravar registro proprio, e cola sem gravar tambem
+  memmove(textBuffer + start, textBuffer + end, textLength - end);
+  textLength -= removedLen;
+  cursorPosition = start;
+  selectionAnchor = -1;
+  if (len > 0) {
+    memmove(textBuffer + cursorPosition + len, textBuffer + cursorPosition, textLength - cursorPosition);
+    memcpy(textBuffer + cursorPosition, clipboard, len);
+    textLength += len;
+    cursorPosition += (int)len;
+  }
+  textBuffer[textLength] = '\0';
+  unsavedChanges = true;
+  lineBreaksDirty = true;
+  editorRecalculateLines();
+  ensureCursorVisible(storedVisibleLines);
+}
+
 void editorPasteAtCursor() {
   if (clipboardLen == 0 || !clipboard) return;
   size_t len = clipboardLen;
   if (textLength + len >= TEXT_BUFFER_SIZE) len = TEXT_BUFFER_SIZE - 1 - textLength;
   if (len == 0) return;
+  undoRecord(cursorPosition, nullptr, 0, len);
   memmove(textBuffer + cursorPosition + len, textBuffer + cursorPosition, textLength - cursorPosition);
   memcpy(textBuffer + cursorPosition, clipboard, len);
   textLength += len;
