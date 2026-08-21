@@ -3155,3 +3155,15 @@ entrada real do aparelho quando ele esta na rua, e ele combina exatamente com
 o genero que o painel ja pedia -- turnos, quebra-cabecas, menus. Um programa
 que precise de mais teclas que isso so funciona em casa, com o teclado BLE
 pareado, e vale saber disso antes de escrever e nao depois.
+
+### Confirmado no aparelho (desfazer, .bak, data)
+
+Gravado e testado no MicroBASIC: os cinco casos do desfazer, o Ctrl+L, a
+ausencia de `.bak` ao lado dos arquivos, e a data.
+
+A data merece nota, porque aqui a expectativa e outra: o cartao deste
+aparelho tem o CPR-vCodex, entao o `lastKnownValidTimestamp` existe e a data
+sai **real**, avancando dentro da sessao pelo `millis()` -- ao contrario do
+aparelho do MicroWriter, cujo cartao tem CrossPoint, que usa o mesmo arquivo
+mas nao guarda o campo, e por isso cai na data de compilacao fixa. Os dois
+caminhos do codigo ficaram exercitados em hardware, cada um no seu aparelho.
