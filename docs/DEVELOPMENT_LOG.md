@@ -3167,3 +3167,58 @@ sai **real**, avancando dentro da sessao pelo `millis()` -- ao contrario do
 aparelho do MicroWriter, cujo cartao tem CrossPoint, que usa o mesmo arquivo
 mas nao guarda o campo, e por isso cai na data de compilacao fixa. Os dois
 caminhos do codigo ficaram exercitados em hardware, cada um no seu aparelho.
+
+## SCREEN 2 e 3 ilegiveis: empacotamento de bits, nao a fonte
+
+Reportado como "as fontes em SCREEN 2 e 3 estao completamente ilegiveis,
+apesar de as previas geradas serem legiveis". O diagnostico veio do port para
+o M5PaperS3, com foto do hardware mostrando texto de interface nitido ao lado
+da grade do terminal borrada **no mesmo quadro** -- o que ja apontava para o
+caminho da fonte da grade, nao para o renderizador.
+
+**A causa:** `emit_epdfont_header.py` empacotava cada linha do glifo
+separadamente, arredondando para `ceil(width/8)` bytes por linha. O
+`renderCharImpl()` do GfxRenderer le o oposto -- um fluxo continuo pelo glifo
+inteiro:
+
+    const int pixelPosition = glyphY * width + glyphX;
+    const uint8_t byte = bitmap[pixelPosition >> 3];
+
+Para larguras multiplas de 8 os dois esquemas **coincidem por acaso**, e e por
+isso que ninguem notou em anos: SCREEN 0 (24) e SCREEN 1 (16) sempre
+renderizaram certo. SCREEN 2 (12) e SCREEN 3 (10) desalinham 4 e 6 bits por
+linha, acumulando -- da segunda linha em diante o glifo vira ruido. Esses dois
+modos **nunca** renderizaram corretamente.
+
+Corrigido substituindo o empacotamento linha a linha por um fluxo continuo,
+com preenchimento so no fim do ultimo byte. Confirmacoes de que a correcao e
+exatamente essa:
+
+- `unscii_24x48.h` e `unscii_16x32.h` sairam **byte a byte identicos** aos
+  anteriores, como a teoria previa.
+- O tamanho dos outros dois caiu para o exato: 12x24 -> 36 bytes/glifo,
+  10x20 -> 25. O que sobrava antes era padding de linha.
+- Decodificando o `.h` com o mesmo algoritmo do `renderCharImpl`, os glifos
+  saem como formas legiveis; antes saiam como ruido a partir da linha 2.
+
+### O que eu tinha diagnosticado errado
+
+Antes de receber esse achado, eu havia decodificado os `.h` com o esquema
+**linha a linha** -- o mesmo do gerador -- e portanto vi os glifos como o
+gerador os pretendia, nao como o aparelho os lia. Vi tracos de 3px e conclui
+que o problema era a ampliacao fracionaria (1.25x e 1.5x de unscii 8x16), e ia
+propor trocar por Terminus, que temos em 10x20 e 12x24 **nativos** em
+`research/fonts/src/`.
+
+Estava olhando o lugar certo pelo motivo errado: decodifiquei com o mesmo
+engano do codigo que gerou o arquivo, entao os dois erros se cancelaram e o
+defeito ficou invisivel. A licao e concreta: **ao verificar um formato,
+decodifique com o consumidor real, nao com o produtor.**
+
+### O que fica em aberto (opcional)
+
+A ampliacao fracionaria continua existindo: em 10x20, unscii sai com tracos de
+3px, contra 1px do Terminus nativo. Agora que o empacotamento esta certo, da
+para julgar isso no painel de verdade -- pode ser que 3px leia melhor em
+e-ink, onde traco de 1px as vezes fica palido. Se nao ler, os arquivos para a
+troca ja estao no repositorio.
