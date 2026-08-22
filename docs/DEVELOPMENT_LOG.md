@@ -3235,3 +3235,54 @@ estava errado, e ele fazia o resultado parecer culpa da ampliacao.
 como alternativa registrada, mas a decisao esta tomada e tem evidencia de
 hardware: unscii ampliado com traco reforcado le melhor neste painel do que
 uma fonte de traco fino desenhada para o tamanho.
+
+## O hifen virava um ponto: o cap de haste nao distinguia haste de barra
+
+Segundo defeito de fonte encontrado no port para o M5PaperS3 e trazido para
+ca. Sintoma: em SCREEN 2 e 3, `-` e `_` saiam com um traco curtissimo, quase
+um ponto.
+
+O glifo nativo do hifen ocupa 6 dos 8 px da celula (75%). Depois do
+redimensionamento saia com 3px de 15 (20%) -- desproporcional ao ponto de
+parecer sujeira, nao caractere.
+
+**A causa:** `cap_stem_width()` cortava para `MAX_STEM_WIDTH` qualquer corrida
+horizontal que fosse um pequeno excesso sobre a corrida *tipica* (mediana) do
+glifo. Num glifo que e essencialmente **uma barra larga**, a propria barra e a
+mediana -- entao ela era lida como "haste engordada pelo upscale" e cortada,
+por mais larga que devesse ser.
+
+**A correcao:** exigir tambem que a corrida faca parte de uma feicao
+verticalmente alta. Uma haste de verdade (`I`, `l`, `T`, `1`) encadeia por
+12-22 linhas da celula; uma barra horizontal deliberada (`-`, `_`, os dois
+tracos do `=`) para em 2-3. A distancia entre os dois grupos e grande, entao o
+limiar de 6 linhas nao e sensivel ao valor exato.
+
+Resultado, medido nos `.h` gerados e decodificados com o algoritmo do
+`renderCharImpl`:
+
+    glifo        antes        agora
+    -            ~3px         8 de 10 px (80%), contra 75% do nativo
+    _            ~3px         largura cheia
+    =            barrinhas    duas barras cheias
+    l, I         haste 3px    haste 3px, inalterada
+
+As hastes verticais continuam capeadas -- que era o proposito original da
+funcao -- e as barras horizontais recuperaram a proporcao.
+
+### Como o defeito foi isolado
+
+Vale registrar o caminho, porque houve um falso comeco instrutivo: a primeira
+investigacao comparou a saida **ja capeada contra ela mesma capeada de novo**,
+que e idempotente, e portanto nao mostrava diferenca nenhuma. So comparando
+`AreaResampledHexFont` (pai, sem cap) contra `UnsciiScreenFont` (filho, com
+cap) o culpado apareceu.
+
+E o mesmo formato do erro do dia anterior: **medir uma transformacao com uma
+ferramenta que ja sofreu a transformacao**. Ontem foi decodificar o bitmap com
+o esquema do produtor em vez do consumidor; hoje foi comparar o resultado
+capeado com ele mesmo. Nos dois casos o defeito ficou invisivel porque o
+instrumento carregava o mesmo vies do objeto medido.
+
+SCREEN 0 e 1 nao passam pelo cap (escala inteira), entao os arquivos deles
+nao mudaram -- confirmado pelos hashes.
