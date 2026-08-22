@@ -261,6 +261,19 @@ void screenEditorClearLogicalLine() {
 
 void screenEditorStartNewInputLine() {
   int rows = screenEditorRows();
+
+  // Desce a partir do FIM da linha logica, nao da linha fisica onde o cursor
+  // esta. Uma linha que quebrou ocupa varias linhas fisicas, e dar Enter com
+  // o cursor na primeira delas deixava o cursor pousado na propria
+  // continuacao: a linha era registrada inteira e correta na memoria de
+  // programa, mas o cursor terminava dentro dela. Digitar ali e dar Enter
+  // resubmetia a linha de cima concatenada com o texto novo, o que dava erro.
+  //
+  // logicalLineEndRow() percorre a cadeia de continuacao, entao isto vale
+  // para uma quebra de duas linhas ou de cinco -- quantas a resolucao do
+  // momento exigir.
+  cursorRow = logicalLineEndRow();
+
   cursorCol = 0;
   if (cursorRow < rows - 1) {
     cursorRow++;

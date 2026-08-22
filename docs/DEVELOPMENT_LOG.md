@@ -3327,3 +3327,26 @@ Vale notar o padrao: os tres defeitos de hoje (empacotamento de bits, cap de
 haste, e este) tem a mesma forma. Um caso geral foi tratado como se fosse o
 unico, e a excecao so aparece quando alguem faz o percurso incomum -- ou
 porta para um hardware com outras medidas.
+
+### E o cursor parava dentro da propria linha que acabara de registrar
+
+Continuacao do defeito acima, encontrado ao testar a correcao. Dando Enter na
+**primeira** linha fisica de uma linha que quebrou, a linha era registrada
+inteira e correta na memoria de programa -- mas o cursor descia so uma linha
+fisica e pousava na propria continuacao dela. Digitar ali e dar Enter
+resubmetia a linha de cima concatenada com o texto novo, e dava erro.
+
+`screenEditorStartNewInputLine()` avancava a partir da linha **fisica** onde o
+cursor estava. Passa a avancar a partir do fim da linha **logica**, via
+`logicalLineEndRow()`, que ja existia e percorre a cadeia de continuacao --
+entao vale para uma quebra de duas linhas ou de cinco, conforme a resolucao do
+momento exigir. Isso importa: o mesmo texto quebra em numero diferente de
+linhas em SCREEN 0 e em SCREEN 3.
+
+Verificado na mesma simulacao da grade: quebra de 2 -> cursor na linha 2,
+quebra de 3 -> linha 3, linha sem quebra -> proxima linha, como sempre.
+
+A observacao do usuario ja continha a solucao ("posicionar o cursor no final
+real da linha que sera registrada"); o que mudou foi so onde aplicar --
+descer a partir do fim em vez de reposicionar antes de descer, o que reusa a
+funcao que ja sabia percorrer a cadeia.
