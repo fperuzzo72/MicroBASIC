@@ -191,7 +191,25 @@ void screenEditorBackspace() {
     // cursor really is up there. On a line the user started fresh, backspace
     // at column 0 must do nothing -- otherwise it walks back into, and eats,
     // whatever unrelated text happens to be on the previous row.
-    rowIsContinuation[cursorRow] = false;
+    //
+    // Unwrap only if nothing is left on this row. Clearing the flag
+    // unconditionally -- which is what this did -- silently orphaned text:
+    // type a line long enough to wrap, move away without pressing Enter, come
+    // back to column 0 of the tail and backspace once, and the row stopped
+    // counting as a continuation while still holding its text. Enter on the
+    // row above then submitted only the first physical row and the rest was
+    // gone.
+    //
+    // Deleting the line outright fixes that and introduces the mirror
+    // problem: a tail backspaced empty stays flagged, so a fresh line typed
+    // there later gets glued to the row above on Enter. Testing the row is
+    // what separates the two -- unwrapping is exactly the case where the tail
+    // has nothing left on it.
+    bool rowEmpty = true;
+    for (int c = 0; c < cols; c++) {
+      if (grid[cursorRow][c] != (uint32_t)' ') { rowEmpty = false; break; }
+    }
+    if (rowEmpty) rowIsContinuation[cursorRow] = false;
     cursorRow--;
     cursorCol = cols - 1;
   } else {

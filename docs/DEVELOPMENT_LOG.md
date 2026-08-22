@@ -3286,3 +3286,44 @@ instrumento carregava o mesmo vies do objeto medido.
 
 SCREEN 0 e 1 nao passam pelo cap (escala inteira), entao os arquivos deles
 nao mudaram -- confirmado pelos hashes.
+
+## Backspace atravessando a quebra apagava o resto da linha
+
+Terceiro achado trazido do port para o M5PaperS3. Cenario, do usuario:
+
+> escrevi uma linha numerada longa que passou da ultima coluna, nao dei enter,
+> desci uma linha, dei enter ali, subi duas para ficar na continuacao, dei um
+> backspace e voltei para a de cima -- e o enter registrou a linha so ate o
+> fim da primeira linha fisica, esquecendo o que vinha depois.
+
+`screenEditorBackspace()` limpava `rowIsContinuation[cursorRow]`
+**incondicionalmente** ao cruzar a fronteira. Com isso a cauda deixava de
+contar como continuacao enquanto ainda segurava texto, e o Enter na linha de
+cima submetia so a primeira linha fisica. O resto sumia sem aviso.
+
+### Por que nao foi so remover a linha
+
+O port resolveu removendo a atribuicao. Isso conserta o caso relatado e
+introduz o espelho dele: uma cauda **apagada ate esvaziar** continua marcada
+como continuacao, entao uma linha nova digitada ali depois e grudada na de
+cima no Enter.
+
+A linha existia por um motivo legitimo -- desdobrar. O que faltava era a
+condicao: desdobrar e exatamente o caso em que a cauda **nao tem mais nada**.
+Se ainda tem texto, ela segue sendo continuacao.
+
+Comparadas as tres variantes numa simulacao da grade fora do aparelho:
+
+    variante                     cenario do usuario   linha nova em cauda vazia
+    limpar sempre (antigo)       perde o texto        ok
+    nunca limpar (port)          ok                   gruda na linha de cima
+    limpar so se vazia (esta)    ok                   ok
+
+O segundo cenario e bem menos provavel que o primeiro -- exige apagar ate
+esvaziar e depois voltar ali para escrever -- mas e a mesma perda silenciosa,
+e a condicao custa quatro linhas.
+
+Vale notar o padrao: os tres defeitos de hoje (empacotamento de bits, cap de
+haste, e este) tem a mesma forma. Um caso geral foi tratado como se fosse o
+unico, e a excecao so aparece quando alguem faz o percurso incomum -- ou
+porta para um hardware com outras medidas.
