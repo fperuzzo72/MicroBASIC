@@ -3350,3 +3350,29 @@ A observacao do usuario ja continha a solucao ("posicionar o cursor no final
 real da linha que sera registrada"); o que mudou foi so onde aplicar --
 descer a partir do fim em vez de reposicionar antes de descer, o que reusa a
 funcao que ja sabia percorrer a cadeia.
+
+### Confirmado no aparelho
+
+Testado no SCREEN 0 (32 colunas, onde uma linha quebra em mais linhas
+fisicas): linha longa, Enter na primeira fisica, cursor pousa abaixo de todas,
+e o que foi digitado depois entra como linha nova.
+
+Duas coisas ficaram estabelecidas de passagem, ambas verificadas e nao
+supostas:
+
+- **A quebra vale igual para comandos nao numerados.** O editor de tela nao
+  sabe nem se importa se a linha tem numero: `screenEditorGetLogicalLineText()`
+  so concatena as linhas fisicas da cadeia, e quem decide o que fazer com o
+  texto e o `executeLogicalLine()`, depois. Numeracao e assunto do
+  interpretador, quebra de linha e assunto da tela.
+- **Encadeamento e com `:`**, e funciona em modo direto igual a uma linha
+  numerada. Verificado no harness, incluindo um `FOR`/`NEXT` inteiro numa
+  linha so:
+
+      PRINT "a":PRINT "b":PRINT "c"
+      FOR I=1 TO 3:PRINT I;:NEXT:PRINT
+
+E uma correcao a uma orientacao de teste que eu tinha dado invertida: para
+forcar muitas linhas fisicas e o SCREEN 0 (32 colunas), nao o SCREEN 3 (80).
+Mais colunas significa menos quebras. Uma linha no limite de 160 caracteres
+ocupa 5 linhas fisicas no SCREEN 0 e 2 no SCREEN 3.
